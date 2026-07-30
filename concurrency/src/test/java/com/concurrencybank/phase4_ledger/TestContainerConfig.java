@@ -12,8 +12,16 @@ import org.testcontainers.containers.PostgreSQLContainer;
  */
 public abstract class TestContainerConfig {
 
+    // The database name is what keeps this container distinct from the other
+    // modules'. Reuse is keyed on a hash of the container configuration, so two
+    // modules asking for an identically-configured postgres:16-alpine get the
+    // *same* physical container - and then whichever runs second finds the
+    // other's `accounts` table already there, silently skips its own
+    // CREATE TABLE IF NOT EXISTS, and fails on the missing columns.
     static final PostgreSQLContainer<?> POSTGRES =
-            new PostgreSQLContainer<>("postgres:16-alpine").withReuse(true);
+            new PostgreSQLContainer<>("postgres:16-alpine")
+                    .withDatabaseName("concurrencybank")
+                    .withReuse(true);
 
     static {
         POSTGRES.start();
