@@ -1,0 +1,28 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: postgres-bank
+  datasource:
+    url: jdbc:postgresql://localhost:5432/postgresbank
+    username: postgresbank
+    password: postgresbank
+  sql:
+    init:
+      mode: always
+  jpa:
+    hibernate:
+      # schema.sql owns the schema - Hibernate never creates or alters tables.
+      ddl-auto: none
+    open-in-view: false
+    properties:
+      hibernate:
+        # Needed so tests can read sessionFactory.getStatistics() and assert
+        # on query counts for the N+1 demo in phase4.
+        generate_statistics: true
+    show-sql: false
+
+logging:
+  level:
+    com.postgresbank: debug

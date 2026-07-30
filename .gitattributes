@@ -1,0 +1,6 @@
+* text=auto eol=crlf
+
+# Keep LF: these are run by a POSIX shell (git-bash, WSL, CI containers),
+# which fails on CR characters.
+mvnw text eol=lf
+*.sh text eol=lf

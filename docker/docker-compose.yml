@@ -1,0 +1,61 @@
+name: learning-bank
+
+# One stack for every module. Tests don't use any of this - they get their own
+# throwaway containers from Testcontainers (see each module's TestContainerConfig).
+# This is only for `mvnw spring-boot:run`.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: learning-bank-postgres
+    environment:
+      # The superuser exists only to run the init script below; each module
+      # connects as its own role against its own database.
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Single-broker Kafka in KRaft mode - note there is no ZooKeeper container here.
+  # Modern Kafka stores cluster metadata in its own Raft quorum, so this one process
+  # is both "broker" (serves data) and "controller" (manages metadata, elects
+  # partition leaders). In production those roles run on separate nodes.
+  kafka:
+    image: apache/kafka:3.9.1
+    container_name: learning-bank-kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      # These MUST be 1 on a single-broker cluster. They default to 3, and a topic
+      # that can't meet its replication factor simply fails to be created - which
+      # surfaces as confusing consumer-group errors rather than an obvious message.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      # Don't wait the default 3s before the first consumer group rebalance.
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:

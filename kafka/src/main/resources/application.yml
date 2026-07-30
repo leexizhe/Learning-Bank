@@ -1,0 +1,70 @@
+spring:
+  application:
+    name: kafka-bank
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/kafkabank
+    username: kafkabank
+    password: kafkabank
+  jpa:
+    hibernate:
+      ddl-auto: none
+    open-in-view: false
+  sql:
+    init:
+      mode: always
+
+  kafka:
+    bootstrap-servers: localhost:9092
+
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      # acks=all: the leader waits for every in-sync replica to persist the record
+      # before acknowledging. acks=1 (leader only) can silently lose a write if the
+      # leader dies before followers catch up - unacceptable for money movement.
+      acks: all
+      # Retry a failed send rather than dropping it on the floor.
+      retries: 3
+      properties:
+        # Idempotent producer: Kafka de-duplicates retried sends using a producer id
+        # + sequence number, so a retry after a network blip can't write the record
+        # twice. This is PRODUCER-side dedup only - it says nothing about a consumer
+        # reading the same record twice, which is what the ProcessedEvent table is for.
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+
+    consumer:
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      # ErrorHandlingDeserializer wraps the real deserializer so a malformed payload
+      # surfaces as a failed record the error handler can route to the DLT, instead of
+      # throwing inside the poll loop and getting retried forever (a "poison pill").
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      # A brand-new consumer group starts from the beginning of the topic rather than
+      # skipping everything already written.
+      auto-offset-reset: earliest
+      # Offsets are committed explicitly in code (see ack-mode below), never on a timer.
+      enable-auto-commit: false
+      properties:
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
+        spring.json.trusted.packages: com.kafkabank.common
+
+    listener:
+      # THE reliability setting in this project. With the default (BATCH) ack mode
+      # Spring commits offsets after the listener returns, on a schedule. If the app
+      # crashes between "record read" and "ledger updated", the offset may already be
+      # committed and that payment is silently lost. MANUAL_IMMEDIATE means nothing is
+      # committed until our code calls ack.acknowledge() - which we only do after the
+      # database transaction has committed.
+      ack-mode: manual_immediate
+      # One listener thread per container. Bump toward the partition count to consume
+      # partitions in parallel; going above the partition count just idles threads,
+      # because a partition is only ever assigned to one consumer in a group.
+      concurrency: 3
+
+server:
+  port: 8082
+
+logging:
+  level:
+    com.kafkabank: INFO

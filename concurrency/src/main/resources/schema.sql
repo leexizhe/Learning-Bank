@@ -1,0 +1,6 @@
+CREATE TABLE IF NOT EXISTS accounts (
+    id BIGSERIAL PRIMARY KEY,
+    owner VARCHAR(255) NOT NULL UNIQUE,
+    balance_minor BIGINT NOT NULL,
+    version BIGINT NOT NULL DEFAULT 0
+);

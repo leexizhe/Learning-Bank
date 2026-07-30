@@ -1,0 +1,20 @@
+spring:
+  application:
+    name: concurrency-bank
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: jdbc:postgresql://localhost:5432/concurrencybank
+    username: concurrencybank
+    password: concurrencybank
+  jpa:
+    hibernate:
+      ddl-auto: none
+    open-in-view: false
+  sql:
+    init:
+      mode: always
+
+server:
+  port: 8081

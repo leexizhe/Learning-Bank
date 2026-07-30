@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.learningbank</groupId>
+        <artifactId>learning-bank</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>postgres</artifactId>
+    <name>postgres</name>
+    <description>A toy bank ledger built to rehearse PostgreSQL-internals interview questions (Wise/Revolut-style): MVCC, storage internals, WAL/coordination, vacuum and performance</description>
+
+    <!-- No extra dependencies - the Postgres driver and the Testcontainers
+         postgres module are both inherited from the parent. -->
+</project>

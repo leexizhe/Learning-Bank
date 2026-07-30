@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.learningbank</groupId>
+        <artifactId>learning-bank</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>kafka</artifactId>
+    <name>kafka</name>
+    <description>Event-driven payment ledger: Kafka fundamentals and reliability patterns, banking-flavoured</description>
+
+    <dependencies>
+        <!-- The whole point of this module. Version managed by the Boot BOM,
+             which is where @RetryableTopic and @DltHandler come from. -->
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>kafka</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Awaitility ("wait until this becomes true, or fail after N seconds" -
+             the right tool for asserting on an asynchronous consumer) is not
+             declared here: spring-boot-starter-test already brings it in. -->
+    </dependencies>
+</project>
