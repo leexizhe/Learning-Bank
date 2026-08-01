@@ -158,6 +158,41 @@ abstract class BaseKafkaIT extends TestContainerConfig {
         }
     }
 
+    /**
+     * Waits until {@code count} records matching {@code match} have appeared on
+     * {@code topic}, reading from the beginning with one throwaway group.
+     *
+     * <p>Use this instead of {@link #awaitRecordMatching} when the thing being
+     * asserted is <b>how many times</b> something was published rather than
+     * whether it was. Counting from offset 0 is monotonic, so it cannot be raced:
+     * there is no seek-to-end that has to happen before the trigger, and no
+     * window in which a fast publisher can slip a record past the consumer while
+     * it is still joining the group. Filter on something unique to the test
+     * (a fresh paymentId) and history from other classes is irrelevant.
+     */
+    protected List<ConsumerRecord<String, String>> awaitRecordCount(
+            String topic, Predicate<ConsumerRecord<String, String>> match, int count, Duration timeout) {
+
+        try (KafkaConsumer<String, String> consumer = newStringConsumer()) {
+            consumer.subscribe(List.of(topic));
+            List<ConsumerRecord<String, String>> matched = new ArrayList<>();
+            long deadline = System.nanoTime() + timeout.toNanos();
+
+            while (System.nanoTime() < deadline) {
+                for (ConsumerRecord<String, String> record : consumer.poll(Duration.ofMillis(500)).records(topic)) {
+                    if (match.test(record)) {
+                        matched.add(record);
+                    }
+                }
+                if (matched.size() >= count) {
+                    return matched;
+                }
+            }
+            throw new AssertionError("Expected " + count + " matching records on " + topic + " within " + timeout
+                    + ", but saw " + matched.size());
+        }
+    }
+
     private KafkaConsumer<String, String> newStringConsumer() {
         Map<String, Object> props =
                 KafkaTestUtils.consumerProps(KAFKA.getBootstrapServers(), "test-" + UUID.randomUUID(), "false");

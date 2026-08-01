@@ -6,7 +6,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.DltHandler;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.annotation.RetryableTopic;
-import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.retrytopic.DltStrategy;
 import org.springframework.kafka.support.KafkaHeaders;
 import org.springframework.kafka.support.Acknowledgment;
@@ -23,11 +22,9 @@ import org.springframework.stereotype.Component;
 public class PaymentConsumer {
 
     private final PaymentProcessingService paymentProcessingService;
-    private final KafkaTemplate<String, Object> kafkaTemplate;
 
-    public PaymentConsumer(PaymentProcessingService paymentProcessingService, KafkaTemplate<String, Object> kafkaTemplate) {
+    public PaymentConsumer(PaymentProcessingService paymentProcessingService) {
         this.paymentProcessingService = paymentProcessingService;
-        this.kafkaTemplate = kafkaTemplate;
     }
 
     /**
@@ -49,9 +46,24 @@ public class PaymentConsumer {
      * that someone has to remember to update.
      *
      * <p><b>Manual ack.</b> {@code ack.acknowledge()} is the last statement, after the
-     * database transaction has committed and the result has been published. Commit the
-     * offset any earlier and a crash in between means Kafka believes this payment was
-     * handled when it wasn't — the message is gone and the money never moved.
+     * database transaction has committed. Commit the offset any earlier and a crash in
+     * between means Kafka believes this payment was handled when it wasn't — the
+     * message is gone and the money never moved.
+     *
+     * <p><b>What changed, and why the ack didn't have to move.</b> This method used to
+     * take the result back from {@code process()} and hand it to an asynchronous
+     * {@code kafkaTemplate.send}, then acknowledge on the next line — which committed
+     * the offset while the record was still sitting in the producer's accumulator.
+     * A rejected send meant the result was lost with no redelivery and no DLT.
+     *
+     * <p>The tempting repair is to block on that send before acknowledging. It doesn't
+     * work, and {@link PaymentProcessingService} explains why in full: the retry it
+     * triggers hits the idempotency check, which correctly refuses to debit twice and
+     * thereby guarantees the result can never be produced again. The actual fix is that
+     * the result is now written to the outbox <em>inside</em> {@code process()}'s
+     * transaction, so there is no longer anything asynchronous between the commit and
+     * the ack for a crash to fall into. The {@code KafkaTemplate} dependency is gone
+     * from this class entirely — publishing is {@link PaymentOutboxRelay}'s job.
      */
     @RetryableTopic(
             attempts = "3",
@@ -68,28 +80,15 @@ public class PaymentConsumer {
         log.info("Consuming eventId={} paymentId={} from partition={} offset={}",
                 event.eventId(), event.paymentId(), partition, offset);
 
-        // 1. Database work, in its own transaction. Empty means "already applied".
-        paymentProcessingService
-                .process(event)
-                // 2. Publish the outcome only after that transaction has committed.
-                //
-                //    This is the classic DUAL-WRITE problem and worth naming in an
-                //    interview: the DB commit and the Kafka publish are two separate
-                //    systems with no shared transaction. Crash between them and the money
-                //    has moved but no result event exists. The offset isn't committed
-                //    either, so the event is redelivered - and the idempotency check
-                //    correctly refuses to debit twice, but it also doesn't republish the
-                //    missing result.
-                //
-                //    The production answer is the TRANSACTIONAL OUTBOX pattern: write the
-                //    outgoing event into an outbox table inside the same DB transaction as
-                //    the debit, and let a separate relay (or Debezium CDC) publish from
-                //    that table. One atomic write, no window. Left out here on purpose -
-                //    it's a whole subsystem, and the point of this file is the consumer
-                //    reliability story.
-                .ifPresent(result -> kafkaTemplate.send(Topics.PAYMENT_RESULTS, String.valueOf(result.accountId()), result));
+        // 1. Everything for this payment in one transaction: the idempotency marker,
+        //    the debit, and the result event written to the outbox table. There is
+        //    no second system to write to here, so there is no dual write to get
+        //    caught out by - which is the whole reason the outbox exists.
+        paymentProcessingService.process(event);
 
-        // 3. Only now is it safe to tell Kafka we're done with this offset.
+        // 2. Only now is it safe to tell Kafka we're done with this offset. Nothing
+        //    asynchronous happened between the commit above and this line, so there
+        //    is no window in which the offset advances past work that didn't land.
         ack.acknowledge();
     }
 
