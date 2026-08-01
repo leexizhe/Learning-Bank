@@ -62,7 +62,7 @@ concurrency/  kafka/  postgres/
 ```
 
 Note that `concurrency` compiles with `--enable-preview`: `StructuredTaskScope`
-is still a preview API in JDK 25 (JEP 499). That flag is set in that module's
+is still a preview API in JDK 25 (JEP 505). That flag is set in that module's
 pom, deliberately not the parent's — preview class files are pinned to the exact
 JDK feature release that compiled them, and the other modules have no reason to
 carry that constraint.

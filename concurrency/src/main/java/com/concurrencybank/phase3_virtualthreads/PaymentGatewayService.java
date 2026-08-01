@@ -75,7 +75,7 @@ public class PaymentGatewayService {
 
     /**
      * The pre-Java-21 way to get the same fan-out. {@code StructuredTaskScope}
-     * is still a preview API in JDK 25 (JEP 499) — some production
+     * is still a preview API in JDK 25 (JEP 505) — some production
      * environments won't turn preview features on, so this is the fallback
      * worth knowing cold.
      *

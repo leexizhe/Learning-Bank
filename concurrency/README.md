@@ -139,7 +139,7 @@ both properties without touching the internals: wall-clock time for three
 successful checks is close to the *slowest* one, not the sum (fan-out), and
 when one check fails fast, the other two — even configured for 2 seconds —
 don't hold up the response (cancellation). Still a *preview* API in JDK 25
-(JEP 499), which is the whole reason the other two variants exist.
+(JEP 505), which is the whole reason the other two variants exist.
 
 **2. `validateWithExecutorService()` — the pre-Java-21 fallback**, for when
 preview features aren't an option. A shared `ExecutorService` backed by a
