@@ -1,0 +1,41 @@
+# The whole suite, on a real Docker daemon. There is no "fast" job here on
+# purpose: kafka and postgres have no unit-test layer at all, so a build that
+# skipped containers would prove almost nothing about this repo.
+name: build
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    # One Kafka container plus three Postgres ones, and every IT waits on real
+    # brokers and real transactions. 12-20 minutes is normal; 45 is the ceiling
+    # that says "something is wedged" rather than "the suite is slow".
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # JDK 25 exactly, not "25 or later". The concurrency module compiles with
+      # --enable-preview, and preview class files are pinned to the feature
+      # release that produced them - they refuse to load on 26.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      # ./mvnw, not mvnw.cmd - .gitattributes keeps the POSIX script at LF for
+      # exactly this runner.
+      #
+      # Note there is no TESTCONTAINERS_REUSE_ENABLE here, deliberately. Every
+      # TestContainerConfig asks for .withReuse(true), but reuse only activates
+      # when the *environment* opts in (~/.testcontainers.properties or that
+      # variable). On a throwaway runner you want throwaway containers, so the
+      # flag stays off and reuse degrades to a no-op - which is why CI can't
+      # leak state between jobs the way a developer machine can between runs.
+      - name: Build and run every test
+        run: ./mvnw -B verify

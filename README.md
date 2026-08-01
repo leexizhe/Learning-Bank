@@ -1,5 +1,7 @@
 # Learning-Bank
 
+[![build](https://github.com/leexizhe/Learning-Bank/actions/workflows/build.yml/badge.svg)](https://github.com/leexizhe/Learning-Bank/actions/workflows/build.yml)
+
 Interview-prep projects built around one running story — a toy bank — with a
 module per topic. Each module is a self-contained Spring Boot app with its own
 README written the way you'd actually explain it out loud: the code is the easy
