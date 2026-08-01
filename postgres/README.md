@@ -10,7 +10,7 @@ being able to say *why* each line is there is the interview.
 Every concept here (MVCC, row locks, advisory locks, vacuum, WAL) only means
 something against a **real Postgres**, so - like the kafka module - this project
 has no unit-test layer at all. Every test is a **Testcontainers integration
-test** against a real `postgres:16` instance, and several go further and read
+test** against a real `postgres:18` instance, and several go further and read
 Postgres's own internal counters (`pg_stat_user_tables`, `ctid`) directly,
 rather than just trusting that a fix "should" work.
 
@@ -149,6 +149,7 @@ curl -X POST localhost:8083/api/accounts -H "Content-Type: application/json" -d 
 curl -X POST localhost:8083/api/transfers -H "Content-Type: application/json" -d "{\"idempotencyKey\":\"tx-1\",\"fromAccountId\":1,\"toAccountId\":2,\"amountMinor\":500}"
 curl localhost:8083/api/accounts/1
 curl "localhost:8083/api/accounts/1/postings?page=0&size=10"
+curl "localhost:8083/api/accounts/1/postings/seek?size=10"   # then pass back nextCreatedAt / nextId
 curl -X POST localhost:8083/api/refunds/42
 curl -X POST localhost:8083/api/jobs -H "Content-Type: application/json" -d "{\"payload\":\"job-1\"}"
 curl -X POST localhost:8083/api/jobs/claim
@@ -330,6 +331,166 @@ authorization logic itself.
 
 ---
 
+## Phase 5 — Indexes & query plans (`phase5_indexing/`)
+
+**Assert on the plan, never on the clock.** Every test here runs
+`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` and asserts on the node types the
+planner chose — the same discipline as `NPlusOneIT` counting Hibernate
+statements instead of timing them. A timing assertion tells you the machine was
+busy; a plan assertion tells you what the database decided and why. The JSON is
+parsed rather than string-matched, because `"Index Only Scan"` contains
+`"Index Scan"` and grep can't tell a top-level `Seq Scan` from one buried in a
+subplan.
+
+**A sequential scan is sometimes correct — `IndexPlanIT`.** The fixture seeds
+100k postings split lopsidedly across two accounts. The account holding a couple
+of hundred rows gets an **Index Scan**; the account holding essentially all of
+them correctly gets a **Seq Scan**, because reading 99% of a table through an
+index means a random heap jump per row and costs more than just reading the
+table. Same table, same index, opposite decisions, both right. If your answer to
+*"why isn't it using my index?"* is always "force it", this is the case that
+should change your mind. A third test drops the index inside a transaction that
+is **always rolled back** — DDL is transactional in Postgres, unlike MySQL — and
+watches the same query fall back to a Seq Scan touching far more of the disk.
+Deliberately not `SET enable_indexscan = off`, which would only prove the
+planner obeys a knob.
+
+**Column order: equality first, then the sort — `CompositeOrderIT`.**
+`(account_id, created_at DESC, id DESC)` serves
+`WHERE account_id = ? ORDER BY created_at DESC` with no sort step at all;
+`(created_at, account_id)` doesn't. **The assertion is the absence of a sort
+node, not index-vs-seq-scan, and on Postgres 18 that distinction matters.** The
+textbook rule is "a composite index is unusable without a predicate on its
+leading column" — PG18's B-tree **skip scan** softens exactly that, so the wrong
+index may well be *usable* here. What skip scan cannot do is return rows already
+ordered by a trailing column. So "the right index removes the sort" holds on 16
+and 18 alike, and it's the sharper claim: an index earns its keep by satisfying
+the `ORDER BY`, not by being touched.
+
+Worth knowing what actually comes back for the wrong index:
+`[Limit, Incremental Sort, Index Scan]`. **Incremental Sort** (PG13+) appears
+when the input is already ordered by a *prefix* of the required keys, so
+Postgres sorts only within each group of equal values and can start returning
+rows before consuming the whole input. Cheaper than a full `Sort` — and still a
+sort. An exact-equality check for `"Sort"` passes right over it.
+
+**Partial indexes — `PartialIndexIT`.** `idx_outbox_unpublished` covers
+`(id) WHERE NOT published`, which is the only query the relay ever runs. An
+outbox grows forever but its interesting set is always the small unrelayed tail,
+so the index stays proportional to the *backlog* rather than to history. The
+catch: the planner can only use it when it can prove the query's predicate
+implies the index's, so a query that doesn't mention `published` silently gets a
+sequential scan — which the second test asserts, because knowing when it *won't*
+apply is the half people miss.
+
+**Keyset pagination — `KeysetPaginationIT`.** `OFFSET 50000` reads fifty
+thousand rows through the index, discards every one, and returns the next twenty:
+O(offset + size), so the endpoint gets steadily worse in a way that never shows
+up in testing against ten rows. Seeking with a row comparison —
+`(created_at, id) < (:ts, :id)` — is O(page size) at any depth. Written as a row
+constructor rather than `created_at < ? OR (created_at = ? AND id < ?)`, which is
+logically identical but makes the planner choose between two branches instead of
+seeking once. `id` is in the key so the order is **total**: with `created_at`
+alone, rows sharing a timestamp have no defined order between pages, so one can
+be shown twice and another skipped. The two are compared on **buffers read**,
+and the honest cost is stated — no page numbers and no total, because there is no
+`COUNT`, which is why `/postings` and `/postings/seek` both exist.
+
+**Interview tip:** the test that compares the two pagination styles originally
+failed, and the reason is worth more than the test. Reading the cursor with raw
+JDBC (`getTimestamp().toInstant()`) and feeding that `Instant` back through a
+Hibernate-bound parameter compares two different interpretations of a
+`TIMESTAMP WITHOUT TIME ZONE` — the driver resolves against the JVM default zone,
+Hibernate against its own — and the seek landed hours away from the offset page.
+Which is the argument for `TIMESTAMPTZ` over `TIMESTAMP` for anything a cursor is
+built from.
+
+---
+
+## Phase 6 — Operations: snapshots, deferred constraints, deadlocks, online DDL (`phase6_operations/`)
+
+**"Balance is `SUM(postings)` — so how do you read one in a millisecond at ten
+million rows?"** This is the first thing a payments interviewer asks about an
+append-only ledger, and the design isn't wrong, it's *unbounded*. The answer is a
+checkpoint, not a mutable balance column:
+
+```
+balance = snapshot.balance_minor
+        + SUM(postings WHERE account_id = ? AND id > snapshot.as_of_posting_id)
+```
+
+The read becomes O(postings since the last snapshot). **The immutable journal
+stays the source of truth** — the snapshot is a cache that can always be
+recomputed from it and audited against it, so a bad snapshot is a performance bug
+rather than a correctness one. `SnapshotIT` never asserts a number in isolation;
+every assertion compares against `LedgerService.balanceOf`, the full sum it is
+meant to accelerate, and measures the saving in **buffers read** against the
+100k-row fixture. The alternative worth naming: maintain a cached balance in the
+same transaction as each posting, with a nightly job asserting `cached ==
+SUM(postings)`. Faster, riskier — every write path must remember, and a missed one
+is silent corruption. **Snapshots fail safe; cached balances fail wrong.**
+
+The subtle bit is in `takeSnapshot`: the sum is bounded by the recorded
+high-water mark, not taken over everything. Under READ COMMITTED each statement
+gets a fresh snapshot, so a posting can commit between reading the mark and
+summing — and if it landed inside the balance while sitting *above* the recorded
+id, the delta would add it again and the cached balance would drift upward
+permanently. Bounding the sum makes snapshot and delta partition the postings
+exactly.
+
+**Enforcing double-entry in the database — `DeferredBalanceConstraintIT`.** The
+README used to say debits=credits is enforced "by construction rather than a
+database CHECK", which invites *"so how would you do it in the database?"* A plain
+`CHECK` can't: it sees one row, and the invariant spans every row sharing a
+`transfer_id`. A **deferred constraint trigger** can. `DEFERRABLE INITIALLY
+DEFERRED` is the whole point — halfway through a transfer the ledger is
+legitimately unbalanced, so a trigger firing at statement time would reject every
+transfer ever made. The test drives raw JDBC with `autoCommit = false` so the
+unusual shape is visible: **the INSERT succeeds and the COMMIT throws** `23514`.
+Through `@Transactional` that would surface as a `TransactionSystemException` from
+inside a proxy and the lesson would be lost.
+
+Two implementation notes worth stealing. The trigger's first statement is
+`IF NEW.transfer_id IS NULL THEN RETURN NULL` — phase 1 posts standalone debits
+with a null `transfer_id` and its whole write-skew demo depends on it, so without
+that guard `WriteSkewIT` breaks immediately. And the function body is a
+**single-quoted literal, not `$$` dollar-quoted**: Spring's `ScriptUtils` splits
+`schema.sql` on semicolons and doesn't understand dollar quoting, so a `$$` body
+gets chopped at the first internal `;`.
+
+**Postgres breaks its own deadlocks — `PgDeadlockIT`.** The concurrency module
+deadlocks two Java threads on two `ReentrantLock`s and proves it with
+`ThreadMXBean`. This is the same circular wait one layer down, on two rows — and
+the difference is what happens next. **A JVM deadlock hangs forever; Postgres
+kills a victim.** Any backend waiting longer than `deadlock_timeout` (1s default)
+runs a wait-graph check and aborts one side with SQLSTATE `40P01`; the survivor
+commits. So "handle deadlocks" means something different here: you still prevent
+them by lock ordering (`SELECT ... FOR UPDATE` in ascending id order is the
+database's `LockOrderedTransferService`), but you must also **retry**, because the
+engine will occasionally shoot one of your transactions on purpose. Same retry
+loop `40001` needs — which is why both codes belong in the same catch. The test
+asserts *exactly one* side failed rather than assuming which; Postgres picks.
+
+**Online DDL — `ConcurrentIndexIT`.** Plain `CREATE INDEX` takes a `SHARE` lock:
+reads continue, **every write blocks for the whole build**. That's the difference
+between "the migration was slow" and "the migration took the site down".
+`CONCURRENTLY` takes only `SHARE UPDATE EXCLUSIVE` and lets writes through, at the
+cost of two passes over the table — and it **cannot run inside a transaction
+block**, which the second test asserts by catching SQLSTATE `25001`. That's the
+first thing that bites anyone dropping it into a `@Transactional` migration
+method. The other trap: a `CONCURRENTLY` build that fails partway leaves an
+**invalid** index, still maintained on every write but never used for reads, and
+the migration looks finished. `pg_index.indisvalid` is where you find out.
+
+**Interview tip:** the rest of the zero-downtime toolkit, in one breath —
+`ADD CONSTRAINT ... NOT VALID` then `VALIDATE CONSTRAINT`, so the full-table check
+happens without a strong lock; expand/contract dual-writes for column renames; and
+always `SET lock_timeout` before DDL, so a migration that can't get its lock fails
+fast instead of queueing — with every query arriving behind it queueing too, which
+is how a lock wait becomes an outage.
+
+---
+
 ## Summary for the interview
 
 1. **Ledger as source of truth** - immutable postings, not a mutable balance
@@ -352,18 +513,23 @@ src/main/java/com/postgresbank/
   common/               Account, Posting, Transfer, Outbox entities + repositories, LedgerService, AccountController
   phase1_isolation/     JointOverdraftTransactionalOps, JointOverdraftService, OverdraftController
   phase2_ledger/        TransferTransactionalOps, TransferService, TransferController
-  phase3_coordination/  RefundService, OutboxRelay, PaymentJob, JobRunner, CoordinationController
-  phase4_performance/   AccountHistoryService, PostingHistoryController
+  phase3_coordination/  RefundService, OutboxRelay(+TransactionalOps), PaymentJob, JobRunner, CoordinationController
+  phase4_performance/   AccountHistoryService, PostingHistoryController (offset + seek pagination)
+  phase6_operations/    BalanceSnapshot(+Repository), BalanceSnapshotService(+TransactionalOps)
 src/main/resources/
   application.yml       datasource, hibernate.generate_statistics (needed by NPlusOneIT)
-  schema.sql            accounts / transfers / postings / outbox / payment_jobs
+  schema.sql            tables, indexes, the amount CHECK, snapshots, and the deferred balance trigger
 src/test/java/com/postgresbank/
   TestContainerConfig.java          singleton Postgres container shared by every IT
   testsupport/TestSupport.java      shared account-creation + pg_stat-counter helpers
+  testsupport/ExplainSupport.java   EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) parsed into an assertable plan
+  testsupport/IndexFixture.java     100k-posting fixture, seeded once per container
   phase1_isolation/WriteSkewIT.java
   phase2_ledger/{HotUpdateIT,TupleVersionIT,IdempotencyIT}.java
   phase3_coordination/{AdvisoryLockIT,OutboxIT,SkipLockedIT}.java
   phase4_performance/{NPlusOneIT,PaginationIT,BloatIT,LongTxnBloatIT}.java
+  phase5_indexing/{IndexPlanIT,CompositeOrderIT,PartialIndexIT,KeysetPaginationIT}.java
+  phase6_operations/{SnapshotIT,DeferredBalanceConstraintIT,PgDeadlockIT,ConcurrentIndexIT}.java
 ```
 
 ## Commands
@@ -377,3 +543,28 @@ src/test/java/com/postgresbank/
 Docker Engine 29+ needs `api.version=1.44` in
 `src/test/resources/docker-java.properties` (already there) or
 Testcontainers gets misleading empty 400s from the daemon.
+
+---
+
+## Questions this module answers
+
+| Question | Where |
+|---|---|
+| Two withdrawals against a shared limit both succeed. Why? | phase 1 — write skew, `WriteSkewIT` |
+| What does SERIALIZABLE actually cost you? | phase 1 — SSI, `40001`, retry loops |
+| Where do you store a balance? | phase 2 — nowhere; it's `SUM(postings)` |
+| How is idempotency actually enforced? | phase 2 — a UNIQUE constraint, `IdempotencyIT` |
+| Does an UPDATE rewrite the row in place? | phase 2 — `ctid`, `TupleVersionIT` |
+| What is a HOT update and when do you lose it? | phase 2 — `HotUpdateIT` |
+| Build a job queue that several workers can share. | phase 3 — `SKIP LOCKED`, `SkipLockedIT` |
+| Advisory locks — session or transaction scoped, and why care? | phase 3 — `RefundService` |
+| The table grows but the row count is flat. | phase 4 — bloat, `LongTxnBloatIT` |
+| Why didn't VACUUM reclaim anything? | phase 4 — the vacuum horizon |
+| Find the N+1 without guessing. | phase 4 — Hibernate `Statistics` |
+| Why isn't Postgres using my index? | phase 5 — `IndexPlanIT` |
+| What order should a composite index's columns be in? | phase 5 — `CompositeOrderIT` |
+| Page 5000 of this endpoint is slow. | phase 5 — keyset pagination |
+| Read a balance in a millisecond at 10M postings. | phase 6 — `SnapshotIT` |
+| Enforce debits = credits in the database. | phase 6 — deferred constraint trigger |
+| Two transactions deadlock in Postgres. Does it hang? | phase 6 — `40P01`, `PgDeadlockIT` |
+| Add an index to a hot table without downtime. | phase 6 — `ConcurrentIndexIT` |

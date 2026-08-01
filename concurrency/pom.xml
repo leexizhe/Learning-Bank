@@ -19,7 +19,7 @@
     <build>
         <plugins>
             <!-- StructuredTaskScope (java.util.concurrent) is still a preview API in
-                 JDK 25 (JEP 499, fourth preview): the compiler, Surefire, Failsafe and
+                 JDK 25 (JEP 505, fifth preview): the compiler, Surefire, Failsafe and
                  spring-boot:run all need the enable-preview flag, or the classes
                  referencing it won't compile or load.
 

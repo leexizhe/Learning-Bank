@@ -84,6 +84,7 @@ sequenceDiagram
     participant PE as payment-events
     participant P as PaymentConsumer
     participant DB as Postgres
+    participant RL as PaymentOutboxRelay
     participant PR as payment-results
     participant R as ReconciliationConsumer
     participant DLT as payment-events-dlt
@@ -94,16 +95,18 @@ sequenceDiagram
 
     PE->>P: consume
     alt account exists and has funds
-        P->>DB: debit + mark event processed (one transaction)
-        P->>PR: PaymentResult(ACCEPTED)
+        P->>DB: debit + mark processed + outbox row (ONE transaction)
         P->>PE: ack.acknowledge() - commit offset LAST
     else insufficient funds (a business answer)
-        P->>DB: mark event processed, no debit
-        P->>PR: PaymentResult(REJECTED)
+        P->>DB: mark processed + outbox row, no debit
         P->>PE: ack.acknowledge()
     else unprocessable (unknown account)
         P->>DLT: dead-letter with original topic/offset/exception headers
     end
+
+    DB->>RL: relay claims unpublished rows
+    RL->>PR: PaymentResult(ACCEPTED / REJECTED)
+    Note over DB,PR: the publish is no longer<br/>inside the consumer
 
     PE->>R: consume (different consumer group)
     PR->>R: consume
@@ -167,6 +170,7 @@ packaging change, not a redesign.
 | Offsets & commit timing | `ack-mode: manual_immediate` in `application.yml`; `ack.acknowledge()` is the **last** line of `PaymentConsumer.consume` |
 | Consumer groups | `payment-service` vs `reconciliation-service` — same topic, independent offsets |
 | Idempotent consumer | `ProcessedEvent` + its primary key — proved by `IdempotencyIT` |
+| Transactional outbox | `PaymentOutbox` written inside `process()`'s transaction; `PaymentOutboxRelay` publishes — proved by `OutboxIT` and `OutboxRedeliveryIT` |
 | Idempotent **producer** | `enable.idempotence: true` + `acks: all` in `application.yml` |
 | Retries & DLQ | `@RetryableTopic` + `@DltHandler` on `PaymentConsumer` — proved by `DeadLetterIT` |
 | Replication & failover | 1 replica in dev; see below for why production is different |
@@ -213,21 +217,162 @@ moves on immediately; the waiting happens over there.
 believes they made. It keeps the original topic, offset, and exception as
 headers, so it can be triaged and replayed once the bug is fixed.
 
-## The one thing this deliberately does not solve
+## The dual-write problem, and the transactional outbox
 
-`PaymentConsumer` commits the database transaction and *then* publishes the
-result event. Those are two different systems with no shared transaction — the
-classic **dual-write problem**. Crash in between and the money has moved but no
-result event exists; the offset isn't committed either, so the event is
-redelivered, and the idempotency check correctly refuses to debit twice but also
-doesn't republish the missing result.
+**This started as a bug in this repo, and the bug is the better story.**
+`PaymentConsumer` used to commit the database transaction and then hand the
+result to `kafkaTemplate.send(...)` — which is **asynchronous**. It returns a
+future the moment the record lands in the producer's accumulator, not when the
+broker has it. The code discarded that future and acknowledged the offset on the
+very next line. If the broker rejected the send, the offset was already committed
+and the result was gone: no redelivery, no DLT, nothing to replay. That quietly
+contradicted this module's own headline claim, *commit the offset last*.
 
-The production answer is the **transactional outbox**: write the outgoing event
-into an outbox table inside the same transaction as the debit, and let a separate
-relay (or Debezium CDC) publish from that table. One atomic write, no window.
-It's left out here on purpose — it's a whole subsystem, and the point of this
-project is the consumer reliability story. Being able to name the gap is worth
-more in an interview than pretending it isn't there.
+**The obvious fix doesn't work, and that's the interesting part.** Block on the
+send before acknowledging:
+
+```java
+kafkaTemplate.send(Topics.PAYMENT_RESULTS, key, result).get(5, SECONDS);
+ack.acknowledge();
+```
+
+This narrows the window without closing it. If the send times out the listener
+throws, `@RetryableTopic` redelivers, and `PaymentProcessingService.process` hits
+its own idempotency check, sees the `processed_events` row and returns early. The
+debit is correctly not re-applied — and the result is now **permanently**
+unpublishable, because the only thing that could have produced it was the run
+that already happened. The retry actively makes it worse.
+
+**The fix that works.** The result is written into a `payment_outbox` row inside
+the same transaction as the debit and the `processed_events` marker. Three
+writes, one commit, nothing asynchronous left between the commit and the ack —
+so the `KafkaTemplate` is gone from `PaymentConsumer` entirely. Note *how* this
+resolves the retry trap: not by returning the previously computed result on a
+duplicate, but by never needing to. The early return is safe precisely because
+the first attempt's outbox row is still there.
+
+The outbox row is keyed on `source_event_id`, the id of the `PaymentInitiated`
+event that produced it, so at most one row can ever exist per consumed event.
+Same framing as `processed_events` — the constraint is the guarantee.
+
+**Two relays, and which one is load-bearing.** A `@Scheduled` sweep claims
+unpublished rows with `ORDER BY id ... FOR UPDATE SKIP LOCKED`; a
+`@TransactionalEventListener(AFTER_COMMIT)` publishes the row immediately so the
+happy path doesn't wait out a poll interval. **The poller is the guarantee, the
+listener is the optimization.** Delete the listener and the system is slower but
+still correct; delete the poller and it is fast right up until the first crash.
+The listener therefore catches and logs everything — Spring propagates
+after-commit exceptions back to the caller, so letting one out would fail a
+consumer whose database work had already committed, and dead-letter a payment
+that actually succeeded.
+
+**Two traps worth naming, both of which bit during implementation.**
+
+- The relay is split into `PaymentOutboxRelay` (scheduling) and
+  `PaymentOutboxRelayOps` (`@Transactional`). A `@Scheduled` method calling an
+  annotated method on `this` bypasses the proxy: no transaction opens, the
+  entities come back detached, and the flip to `published` is never flushed. The
+  relay would log "publishing…" forever and mark nothing — and a test calling
+  the method directly would pass, because it goes *through* the proxy.
+- `relayOnce()` is `REQUIRES_NEW`, not the default `REQUIRED`. The after-commit
+  listener runs while the publishing transaction is still completing, so
+  `REQUIRED` joins a transaction that can no longer be used and the claim query
+  fails with *"Query requires transaction be in progress"*. Notice how that hid:
+  the poller retried 500ms later and succeeded, so the system stayed correct and
+  only a log warning said otherwise. **Belt-and-braces designs mask the failure
+  of one of their braces.**
+
+**The honest caveat.** This relay is at-least-once. If the process dies between
+a successful send and the commit that flips `published`, the record is published
+twice. That's safe here because `ReconciliationService` upserts on `paymentId` —
+but the general point is the one to say out loud: **an outbox does not remove the
+need for idempotency, it moves it downstream.** The alternative, flipping the row
+before sending, trades duplicates for lost messages, which for money movement is
+the worse of the two.
+
+**The road not taken.** `processed_events` and `payment_outbox` could be one
+table — the marker row gaining a payload and a `published` flag. Fewer moving
+parts, one less insert per payment. Two tables wins on separation of concerns
+(idempotency and delivery are different jobs with different retention needs) and
+on symmetry with the postgres module's own `outbox`. It's a real trade, not an
+obvious call.
+
+## My own retry topic breaks my own ordering guarantee
+
+Two claims above are in **direct tension**, and noticing it is worth more than a
+design with no tension in it.
+
+This module promises per-account ordering (events keyed by `accountId`, proved by
+`OrderingIT`) *and* non-blocking retries via `@RetryableTopic`. But when event #2
+for an account fails, Spring republishes it to `payment-events-retry-300` and
+moves on — so #3 and #4 keep flowing on the main topic and are applied **first**.
+Per-account ordering is gone precisely in the failure case where it mattered.
+`OrderingUnderRetryIT` proves it: three payments, the second fails transiently,
+and the third takes the money the second was queued for.
+
+**There is no free fix — you pick:**
+
+- **Accept it**, and make the downstream commutative or idempotent. Fine for a
+  debit keyed on an event id; not fine for a state machine where "cancelled then
+  shipped" and "shipped then cancelled" differ.
+- **Block and retry in place**, accepting head-of-line blocking, within a
+  `max.poll.interval.ms` budget — the thing `@RetryableTopic` exists to avoid, so
+  this is a deliberate trade back.
+- **`Consumer.pause()` the partition** and retry with backoff. Keeps order at the
+  cost of throughput *for that partition only*, which is the middle ground.
+
+Two details the test surfaced that are worth carrying:
+
+- **"Non-blocking" retries still block briefly.** When the listener throws, Spring
+  publishes the record to the retry topic *on the consumer thread* — about 450ms
+  here. The first version of the test failed because the retried event beat the
+  following one by 9ms; the two were the same order of magnitude. It now fails
+  twice so the retry lands on the 600ms tier and the margin is a full second.
+- **Assert on a terminal state, never on ordering you observed.** Balances are
+  additive, so the final number is identical either way. Funding the account for
+  exactly one of two equal payments makes "which one was ACCEPTED" a terminal
+  fact that only one ordering can produce.
+
+## Rebalancing
+
+`RebalanceIT` stops the listener container, raises its concurrency and restarts
+it — a genuine leave-and-rejoin, not a simulation — while events are in flight,
+and asserts every account is debited exactly once. **What saves you is
+`processed_events`**, because a rebalance can absolutely redeliver a record whose
+offset had not yet been committed. Rebalancing is not an exactly-once mechanism;
+idempotency is what makes it survivable.
+
+**Three timeouts, three different failures** — worth having cold:
+
+| Setting | What it measures | What it means when it fires |
+|---|---|---|
+| `heartbeat.interval.ms` | liveness, from a background thread | nothing on its own — it feeds the next one |
+| `session.timeout.ms` | how long the coordinator waits for heartbeats | the process is presumed dead |
+| `max.poll.interval.ms` | how long your *processing* takes between polls | a healthy but slow consumer is evicted |
+
+That third one is why `@RetryableTopic` exists rather than sleeping in the
+listener: a long enough sleep gets you kicked out of the group mid-payment.
+
+**Eager vs cooperative.** The classic protocol is stop-the-world — every member
+revokes every partition, then the group reassigns, and nobody works in between,
+so a rolling deploy of N pods costs N full pauses. `CooperativeStickyAssignor`
+(now set in `application.yml`) revokes only the partitions that actually move.
+The operational answer is the upgrade path: you **cannot** flip a live group in
+one deploy, you roll out `[CooperativeSticky, Range]` first so every member
+speaks both, then drop `Range` in a second rollout.
+
+**Static membership (`group.instance.id`) is deliberately *not* configured**, and
+the comment in `application.yml` says why. It lets a restarting pod keep its
+partitions instead of triggering a rebalance — right in production, wrong here,
+because a member that really has gone away holds its partitions until
+`session.timeout.ms` elapses, and this suite starts and stops contexts constantly.
+
+**KIP-848**, for 2026 credibility: the next-generation protocol moves assignment
+off the clients into the broker-side coordinator, so rebalances become
+incremental and stop being stop-the-world. GA in Kafka **4.0** — brokers support
+it out of the box, but `classic` is still the *client* default, so a consumer
+opts in with `group.protocol=consumer`. This module is pinned to `apache/kafka:3.9.1`,
+so that stays a talking point rather than a demo.
 
 ## Trade-offs worth being able to defend
 
@@ -271,6 +416,10 @@ Postgres, or a record actually consumed off a topic. None of them mock anything.
 | `OrderingIT` | Two events for one account apply in produced order, using amounts where the order changes the final balance |
 | `InsufficientFundsIT` | A decline is a business answer: REJECTED result, ROLLBACK reconciliation, balance untouched, **nothing dead-lettered** |
 | `DeadLetterIT` | An unprocessable event reaches the DLT carrying its original topic and failure reason as headers |
+| `OutboxIT` | The result row is written in the *same* transaction as the debit: a successful payment leaves exactly one row, a failed one leaves none. And the relay drains what it finds |
+| `OutboxRedeliveryIT` | A result lost before its send lands is recovered from the outbox, and the redelivery that follows does not debit twice. Counts records rather than waiting for one — the result must appear **twice**, which no timing can fake |
+| `OrderingUnderRetryIT` | That this module's own retry topic breaks its own per-account ordering guarantee — a limitation, proved rather than hidden |
+| `RebalanceIT` | No record is lost or double-applied across a real leave-and-rejoin rebalance; the idempotency table is what saves you |
 
 ```bash
 ./mvnw -pl kafka verify
@@ -288,6 +437,8 @@ src/main/java/com/kafkabank/
   config/          KafkaTopicConfig - partition/replica counts and the reasoning
   order/           OrderController + PaymentInitiationService  (produces payment-events)
   payment/         PaymentConsumer + PaymentProcessingService  (consumes it, owns balances)
+                   PaymentOutboxRelay + ...RelayOps  (the outbox's two relays)
+                   SimulatedTransientFailure  (fault injection for OrderingUnderRetryIT)
   reconciliation/  ReconciliationConsumer + ReconciliationService (consumes BOTH topics)
 src/main/resources/
   application.yml  every Kafka setting, commented with why it's set that way
@@ -295,9 +446,31 @@ src/main/resources/
 src/test/java/com/kafkabank/
   TestContainerConfig.java  singleton Kafka (KRaft) + Postgres
   BaseKafkaIT.java          shared HTTP + topic-draining helpers
-  *IT.java                  the five scenarios above
+  *IT.java                  the nine scenarios above
 ```
 
 Docker Engine 29+ needs `api.version=1.44` in
 `src/test/resources/docker-java.properties` (already there) or Testcontainers
 gets misleading empty 400s from the daemon.
+
+---
+
+## Questions this module answers
+
+| Question | Where |
+|---|---|
+| How do you guarantee a payment is processed exactly once? | the reliability story; `IdempotencyIT` |
+| Where exactly do you commit the offset, and why there? | `ack-mode: manual_immediate`; `PaymentConsumer` |
+| Consumer idempotence vs producer idempotence — different things? | the reliability story |
+| Your DB commit and your Kafka publish aren't atomic. What now? | the outbox section; `OutboxIT` |
+| The process dies between the commit and the publish. | `OutboxRedeliveryIT` |
+| How do you keep events for one account in order? | partition key; `OrderingIT` |
+| ...and what breaks that guarantee? | `OrderingUnderRetryIT` |
+| One account is 50% of your traffic. | trade-offs; hot-partition discussion |
+| What happens during a rebalance? Name the three timeouts. | the rebalancing section; `RebalanceIT` |
+| Eager vs cooperative rebalancing, and how do you migrate? | the rebalancing section |
+| Retry without blocking the partition. | `@RetryableTopic`; `DeadLetterIT` |
+| A business decline isn't a failure — how do you model that? | "rejected is not failed"; `InsufficientFundsIT` |
+| `acks=all` — is that enough for durability? | `KafkaTopicConfig`, `min.insync.replicas` |
+| Why is `max.in.flight=5` safe here? | `application.yml` producer block |
+| How many partitions, and can you change it later? | `KafkaTopicConfig` javadoc |

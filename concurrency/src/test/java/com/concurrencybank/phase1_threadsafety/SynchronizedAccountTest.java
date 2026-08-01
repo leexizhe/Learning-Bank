@@ -8,35 +8,39 @@ import org.junit.jupiter.api.Test;
 
 class SynchronizedAccountTest {
 
-    @Test
-    void concurrentDepositsNeverLoseAnUpdate() throws InterruptedException {
-        SynchronizedAccount account = new SynchronizedAccount();
-        int threads = 50;
-        int depositsPerThread = 10_000;
+  @Test
+  void concurrentDepositsNeverLoseAnUpdate() throws InterruptedException {
+    SynchronizedAccount account = new SynchronizedAccount();
+    int threads = 50;
+    int depositsPerThread = 10_000;
 
-        runConcurrently(threads, () -> {
-            for (int i = 0; i < depositsPerThread; i++) {
-                account.deposit(1);
-            }
+    runConcurrently(
+        threads,
+        () -> {
+          for (int i = 0; i < depositsPerThread; i++) {
+            account.deposit(1);
+          }
         });
 
-        assertThat(account.getBalance()).isEqualTo((long) threads * depositsPerThread);
-    }
+    assertThat(account.getBalance()).isEqualTo((long) threads * depositsPerThread);
+  }
 
-    @Test
-    void concurrentWithdrawalsNeverOverdraw() throws InterruptedException {
-        int threads = 200;
-        SynchronizedAccount account = new SynchronizedAccount();
-        account.deposit(threads); // exactly enough for one successful $1 withdrawal each
-        AtomicInteger successes = new AtomicInteger();
+  @Test
+  void concurrentWithdrawalsNeverOverdraw() throws InterruptedException {
+    int threads = 200;
+    SynchronizedAccount account = new SynchronizedAccount();
+    account.deposit(threads); // exactly enough for one successful $1 withdrawal each
+    AtomicInteger successes = new AtomicInteger();
 
-        runConcurrently(threads, () -> {
-            if (account.withdraw(1)) {
-                successes.incrementAndGet();
-            }
+    runConcurrently(
+        threads,
+        () -> {
+          if (account.withdraw(1)) {
+            successes.incrementAndGet();
+          }
         });
 
-        assertThat(successes.get()).isEqualTo(threads);
-        assertThat(account.getBalance()).isZero();
-    }
+    assertThat(successes.get()).isEqualTo(threads);
+    assertThat(account.getBalance()).isZero();
+  }
 }

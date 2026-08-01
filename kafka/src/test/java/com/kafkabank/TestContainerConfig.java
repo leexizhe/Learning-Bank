@@ -6,42 +6,39 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.kafka.KafkaContainer;
 
 /**
- * Singleton containers for the whole test JVM: started once in a static block
- * and shared by every IT, rather than one broker per test class. Kafka takes a
- * few seconds to come up, so starting it per class would dominate the run time.
+ * Singleton containers for the whole test JVM: started once in a static block and shared by every
+ * IT, rather than one broker per test class. Kafka takes a few seconds to come up, so starting it
+ * per class would dominate the run time.
  *
- * <p>{@code org.testcontainers.kafka.KafkaContainer} (not the older
- * {@code org.testcontainers.containers.KafkaContainer}) is the one that drives
- * the official {@code apache/kafka} image in <b>KRaft</b> mode — no ZooKeeper
- * container to run alongside it. Worth knowing: KRaft replaced ZooKeeper for
- * cluster metadata in modern Kafka, so a "how does Kafka do leader election?"
- * question has a different answer now than it did a few years ago.
+ * <p>{@code org.testcontainers.kafka.KafkaContainer} (not the older {@code
+ * org.testcontainers.containers.KafkaContainer}) is the one that drives the official {@code
+ * apache/kafka} image in <b>KRaft</b> mode — no ZooKeeper container to run alongside it. Worth
+ * knowing: KRaft replaced ZooKeeper for cluster metadata in modern Kafka, so a "how does Kafka do
+ * leader election?" question has a different answer now than it did a few years ago.
  */
 public abstract class TestContainerConfig {
 
-    // The database name is what keeps this container distinct from the other
-    // modules'. Reuse is keyed on a hash of the container configuration, so two
-    // modules asking for an identically-configured postgres:16-alpine get the
-    // *same* physical container - and then whichever runs second finds the
-    // other's `accounts` table already there, silently skips its own
-    // CREATE TABLE IF NOT EXISTS, and fails on the missing columns.
-    static final PostgreSQLContainer<?> POSTGRES =
-            new PostgreSQLContainer<>("postgres:16-alpine")
-                    .withDatabaseName("kafkabank")
-                    .withReuse(true);
+  // The database name is what keeps this container distinct from the other
+  // modules'. Reuse is keyed on a hash of the container configuration, so two
+  // modules asking for an identically-configured postgres:18-alpine get the
+  // *same* physical container - and then whichever runs second finds the
+  // other's `accounts` table already there, silently skips its own
+  // CREATE TABLE IF NOT EXISTS, and fails on the missing columns.
+  static final PostgreSQLContainer<?> POSTGRES =
+      new PostgreSQLContainer<>("postgres:18-alpine").withDatabaseName("kafkabank").withReuse(true);
 
-    static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:3.9.1").withReuse(true);
+  static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:3.9.1").withReuse(true);
 
-    static {
-        POSTGRES.start();
-        KAFKA.start();
-    }
+  static {
+    POSTGRES.start();
+    KAFKA.start();
+  }
 
-    @DynamicPropertySource
-    static void containerProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
-        registry.add("spring.datasource.username", POSTGRES::getUsername);
-        registry.add("spring.datasource.password", POSTGRES::getPassword);
-        registry.add("spring.kafka.bootstrap-servers", KAFKA::getBootstrapServers);
-    }
+  @DynamicPropertySource
+  static void containerProperties(DynamicPropertyRegistry registry) {
+    registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
+    registry.add("spring.datasource.username", POSTGRES::getUsername);
+    registry.add("spring.datasource.password", POSTGRES::getPassword);
+    registry.add("spring.kafka.bootstrap-servers", KAFKA::getBootstrapServers);
+  }
 }
