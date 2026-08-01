@@ -40,8 +40,15 @@ class OutboxIT extends TestContainerConfig {
     @Autowired
     private OutboxRepository outbox;
 
+    /**
+     * The transactional half, not {@link OutboxRelay} itself. Note that calling
+     * this from a test is an <b>external</b> call and therefore goes through the
+     * {@code @Transactional} proxy — which is exactly why this test kept passing
+     * while the scheduled path, which used to self-invoke, silently did nothing.
+     * See {@link OutboxRelayTransactionalOps} for the full story.
+     */
     @Autowired
-    private OutboxRelay relay;
+    private OutboxRelayTransactionalOps relay;
 
     private final ExecutorService pool = Executors.newFixedThreadPool(2);
 
