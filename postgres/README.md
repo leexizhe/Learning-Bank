@@ -407,6 +407,90 @@ built from.
 
 ---
 
+## Phase 6 — Operations: snapshots, deferred constraints, deadlocks, online DDL (`phase6_operations/`)
+
+**"Balance is `SUM(postings)` — so how do you read one in a millisecond at ten
+million rows?"** This is the first thing a payments interviewer asks about an
+append-only ledger, and the design isn't wrong, it's *unbounded*. The answer is a
+checkpoint, not a mutable balance column:
+
+```
+balance = snapshot.balance_minor
+        + SUM(postings WHERE account_id = ? AND id > snapshot.as_of_posting_id)
+```
+
+The read becomes O(postings since the last snapshot). **The immutable journal
+stays the source of truth** — the snapshot is a cache that can always be
+recomputed from it and audited against it, so a bad snapshot is a performance bug
+rather than a correctness one. `SnapshotIT` never asserts a number in isolation;
+every assertion compares against `LedgerService.balanceOf`, the full sum it is
+meant to accelerate, and measures the saving in **buffers read** against the
+100k-row fixture. The alternative worth naming: maintain a cached balance in the
+same transaction as each posting, with a nightly job asserting `cached ==
+SUM(postings)`. Faster, riskier — every write path must remember, and a missed one
+is silent corruption. **Snapshots fail safe; cached balances fail wrong.**
+
+The subtle bit is in `takeSnapshot`: the sum is bounded by the recorded
+high-water mark, not taken over everything. Under READ COMMITTED each statement
+gets a fresh snapshot, so a posting can commit between reading the mark and
+summing — and if it landed inside the balance while sitting *above* the recorded
+id, the delta would add it again and the cached balance would drift upward
+permanently. Bounding the sum makes snapshot and delta partition the postings
+exactly.
+
+**Enforcing double-entry in the database — `DeferredBalanceConstraintIT`.** The
+README used to say debits=credits is enforced "by construction rather than a
+database CHECK", which invites *"so how would you do it in the database?"* A plain
+`CHECK` can't: it sees one row, and the invariant spans every row sharing a
+`transfer_id`. A **deferred constraint trigger** can. `DEFERRABLE INITIALLY
+DEFERRED` is the whole point — halfway through a transfer the ledger is
+legitimately unbalanced, so a trigger firing at statement time would reject every
+transfer ever made. The test drives raw JDBC with `autoCommit = false` so the
+unusual shape is visible: **the INSERT succeeds and the COMMIT throws** `23514`.
+Through `@Transactional` that would surface as a `TransactionSystemException` from
+inside a proxy and the lesson would be lost.
+
+Two implementation notes worth stealing. The trigger's first statement is
+`IF NEW.transfer_id IS NULL THEN RETURN NULL` — phase 1 posts standalone debits
+with a null `transfer_id` and its whole write-skew demo depends on it, so without
+that guard `WriteSkewIT` breaks immediately. And the function body is a
+**single-quoted literal, not `$$` dollar-quoted**: Spring's `ScriptUtils` splits
+`schema.sql` on semicolons and doesn't understand dollar quoting, so a `$$` body
+gets chopped at the first internal `;`.
+
+**Postgres breaks its own deadlocks — `PgDeadlockIT`.** The concurrency module
+deadlocks two Java threads on two `ReentrantLock`s and proves it with
+`ThreadMXBean`. This is the same circular wait one layer down, on two rows — and
+the difference is what happens next. **A JVM deadlock hangs forever; Postgres
+kills a victim.** Any backend waiting longer than `deadlock_timeout` (1s default)
+runs a wait-graph check and aborts one side with SQLSTATE `40P01`; the survivor
+commits. So "handle deadlocks" means something different here: you still prevent
+them by lock ordering (`SELECT ... FOR UPDATE` in ascending id order is the
+database's `LockOrderedTransferService`), but you must also **retry**, because the
+engine will occasionally shoot one of your transactions on purpose. Same retry
+loop `40001` needs — which is why both codes belong in the same catch. The test
+asserts *exactly one* side failed rather than assuming which; Postgres picks.
+
+**Online DDL — `ConcurrentIndexIT`.** Plain `CREATE INDEX` takes a `SHARE` lock:
+reads continue, **every write blocks for the whole build**. That's the difference
+between "the migration was slow" and "the migration took the site down".
+`CONCURRENTLY` takes only `SHARE UPDATE EXCLUSIVE` and lets writes through, at the
+cost of two passes over the table — and it **cannot run inside a transaction
+block**, which the second test asserts by catching SQLSTATE `25001`. That's the
+first thing that bites anyone dropping it into a `@Transactional` migration
+method. The other trap: a `CONCURRENTLY` build that fails partway leaves an
+**invalid** index, still maintained on every write but never used for reads, and
+the migration looks finished. `pg_index.indisvalid` is where you find out.
+
+**Interview tip:** the rest of the zero-downtime toolkit, in one breath —
+`ADD CONSTRAINT ... NOT VALID` then `VALIDATE CONSTRAINT`, so the full-table check
+happens without a strong lock; expand/contract dual-writes for column renames; and
+always `SET lock_timeout` before DDL, so a migration that can't get its lock fails
+fast instead of queueing — with every query arriving behind it queueing too, which
+is how a lock wait becomes an outage.
+
+---
+
 ## Summary for the interview
 
 1. **Ledger as source of truth** - immutable postings, not a mutable balance
@@ -431,9 +515,10 @@ src/main/java/com/postgresbank/
   phase2_ledger/        TransferTransactionalOps, TransferService, TransferController
   phase3_coordination/  RefundService, OutboxRelay(+TransactionalOps), PaymentJob, JobRunner, CoordinationController
   phase4_performance/   AccountHistoryService, PostingHistoryController (offset + seek pagination)
+  phase6_operations/    BalanceSnapshot(+Repository), BalanceSnapshotService(+TransactionalOps)
 src/main/resources/
   application.yml       datasource, hibernate.generate_statistics (needed by NPlusOneIT)
-  schema.sql            accounts / transfers / postings / outbox / payment_jobs + indexes and the amount CHECK
+  schema.sql            tables, indexes, the amount CHECK, snapshots, and the deferred balance trigger
 src/test/java/com/postgresbank/
   TestContainerConfig.java          singleton Postgres container shared by every IT
   testsupport/TestSupport.java      shared account-creation + pg_stat-counter helpers
@@ -444,6 +529,7 @@ src/test/java/com/postgresbank/
   phase3_coordination/{AdvisoryLockIT,OutboxIT,SkipLockedIT}.java
   phase4_performance/{NPlusOneIT,PaginationIT,BloatIT,LongTxnBloatIT}.java
   phase5_indexing/{IndexPlanIT,CompositeOrderIT,PartialIndexIT,KeysetPaginationIT}.java
+  phase6_operations/{SnapshotIT,DeferredBalanceConstraintIT,PgDeadlockIT,ConcurrentIndexIT}.java
 ```
 
 ## Commands

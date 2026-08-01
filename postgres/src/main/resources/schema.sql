@@ -103,3 +103,59 @@ CREATE TABLE IF NOT EXISTS payment_jobs (
     created_at  TIMESTAMP NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_payment_jobs_pending ON payment_jobs (id) WHERE status = 'PENDING';
+
+-- Balance snapshots. The ledger stays the source of truth; this is a cache that
+-- can always be recomputed and audited against it. Reading a balance as
+-- SUM(postings) is O(rows for that account), which is fine at 100 rows and
+-- unusable at 10 million - so a periodic job records "as of posting N the
+-- balance was X" and the read becomes snapshot + SUM(postings newer than N).
+CREATE TABLE IF NOT EXISTS account_balance_snapshots (
+    account_id       BIGINT PRIMARY KEY REFERENCES accounts(id),
+    as_of_posting_id BIGINT NOT NULL,
+    balance_minor    BIGINT NOT NULL,
+    taken_at         TIMESTAMP NOT NULL DEFAULT now()
+);
+
+-- Double-entry enforced by the database rather than by construction: every
+-- posting belonging to a transfer must, together with its siblings, sum to zero.
+--
+-- The body is a SINGLE-QUOTED string, not the usual $$ ... $$ dollar quoting.
+-- Spring's ScriptUtils splits this file on semicolons and does not understand
+-- dollar quotes, so a $$-quoted body gets chopped at the first internal `;` and
+-- Postgres reports an unterminated dollar quote. It does track single quotes,
+-- so the old-style literal survives intact - at the cost of doubling every
+-- quote inside.
+--
+-- The NULL check on the first line is load-bearing: phase1_isolation posts
+-- standalone debits with transfer_id NULL (the write-skew demo), and
+-- transfer_id is nullable by explicit design. Without it, WriteSkewIT and
+-- JointOverdraftService break immediately.
+CREATE OR REPLACE FUNCTION assert_transfer_balanced() RETURNS trigger LANGUAGE plpgsql AS
+'DECLARE
+    total BIGINT;
+BEGIN
+    IF NEW.transfer_id IS NULL THEN
+        RETURN NULL;
+    END IF;
+    SELECT COALESCE(sum(amount_minor), 0) INTO total FROM postings WHERE transfer_id = NEW.transfer_id;
+    IF total <> 0 THEN
+        RAISE EXCEPTION ''transfer % does not balance: its postings sum to %'', NEW.transfer_id, total
+            USING ERRCODE = ''check_violation'';
+    END IF;
+    RETURN NULL;
+END';
+
+-- DEFERRABLE INITIALLY DEFERRED is the entire point. This fires at COMMIT, not
+-- at INSERT: at statement time a transfer is half-written and legitimately
+-- unbalanced, so a non-deferred check would reject every transfer ever made.
+-- A plain CHECK constraint cannot express this at all - CHECK sees one row.
+--
+-- DROP + CREATE rather than a duplicate_object guard, because this file replays
+-- on every startup and the guard would silently keep a stale definition after an
+-- edit. It takes a brief ACCESS EXCLUSIVE lock at startup, which is itself a
+-- live example of the zero-downtime-migration material.
+DROP TRIGGER IF EXISTS postings_transfer_balanced ON postings;
+CREATE CONSTRAINT TRIGGER postings_transfer_balanced
+    AFTER INSERT ON postings
+    DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW EXECUTE FUNCTION assert_transfer_balanced();

@@ -19,6 +19,18 @@ public interface PostingRepository extends JpaRepository<Posting, Long> {
     @Query("select coalesce(sum(p.amountMinor), 0) from Posting p where p.account.id in :accountIds")
     long sumAmountByAccountIdIn(@Param("accountIds") Collection<Long> accountIds);
 
+    /** The delta half of a snapshot read: only the postings written since the snapshot was taken. */
+    @Query("select coalesce(sum(p.amountMinor), 0) from Posting p where p.account.id = :accountId and p.id > :afterId")
+    long sumAmountByAccountIdAfterId(@Param("accountId") long accountId, @Param("afterId") long afterId);
+
+    /** The balance half of a snapshot: everything up to and including the recorded high-water mark. */
+    @Query("select coalesce(sum(p.amountMinor), 0) from Posting p where p.account.id = :accountId and p.id <= :upToId")
+    long sumAmountByAccountIdUpToId(@Param("accountId") long accountId, @Param("upToId") long upToId);
+
+    /** The high-water mark a snapshot is taken "as of". Null when the account has no postings yet. */
+    @Query("select max(p.id) from Posting p where p.account.id = :accountId")
+    Long maxIdByAccountId(@Param("accountId") long accountId);
+
     Page<Posting> findByAccountId(long accountId, Pageable pageable);
 
     /**
