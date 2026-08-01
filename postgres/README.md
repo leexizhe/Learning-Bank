@@ -149,6 +149,7 @@ curl -X POST localhost:8083/api/accounts -H "Content-Type: application/json" -d 
 curl -X POST localhost:8083/api/transfers -H "Content-Type: application/json" -d "{\"idempotencyKey\":\"tx-1\",\"fromAccountId\":1,\"toAccountId\":2,\"amountMinor\":500}"
 curl localhost:8083/api/accounts/1
 curl "localhost:8083/api/accounts/1/postings?page=0&size=10"
+curl "localhost:8083/api/accounts/1/postings/seek?size=10"   # then pass back nextCreatedAt / nextId
 curl -X POST localhost:8083/api/refunds/42
 curl -X POST localhost:8083/api/jobs -H "Content-Type: application/json" -d "{\"payload\":\"job-1\"}"
 curl -X POST localhost:8083/api/jobs/claim
@@ -330,6 +331,82 @@ authorization logic itself.
 
 ---
 
+## Phase 5 — Indexes & query plans (`phase5_indexing/`)
+
+**Assert on the plan, never on the clock.** Every test here runs
+`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` and asserts on the node types the
+planner chose — the same discipline as `NPlusOneIT` counting Hibernate
+statements instead of timing them. A timing assertion tells you the machine was
+busy; a plan assertion tells you what the database decided and why. The JSON is
+parsed rather than string-matched, because `"Index Only Scan"` contains
+`"Index Scan"` and grep can't tell a top-level `Seq Scan` from one buried in a
+subplan.
+
+**A sequential scan is sometimes correct — `IndexPlanIT`.** The fixture seeds
+100k postings split lopsidedly across two accounts. The account holding a couple
+of hundred rows gets an **Index Scan**; the account holding essentially all of
+them correctly gets a **Seq Scan**, because reading 99% of a table through an
+index means a random heap jump per row and costs more than just reading the
+table. Same table, same index, opposite decisions, both right. If your answer to
+*"why isn't it using my index?"* is always "force it", this is the case that
+should change your mind. A third test drops the index inside a transaction that
+is **always rolled back** — DDL is transactional in Postgres, unlike MySQL — and
+watches the same query fall back to a Seq Scan touching far more of the disk.
+Deliberately not `SET enable_indexscan = off`, which would only prove the
+planner obeys a knob.
+
+**Column order: equality first, then the sort — `CompositeOrderIT`.**
+`(account_id, created_at DESC, id DESC)` serves
+`WHERE account_id = ? ORDER BY created_at DESC` with no sort step at all;
+`(created_at, account_id)` doesn't. **The assertion is the absence of a sort
+node, not index-vs-seq-scan, and on Postgres 18 that distinction matters.** The
+textbook rule is "a composite index is unusable without a predicate on its
+leading column" — PG18's B-tree **skip scan** softens exactly that, so the wrong
+index may well be *usable* here. What skip scan cannot do is return rows already
+ordered by a trailing column. So "the right index removes the sort" holds on 16
+and 18 alike, and it's the sharper claim: an index earns its keep by satisfying
+the `ORDER BY`, not by being touched.
+
+Worth knowing what actually comes back for the wrong index:
+`[Limit, Incremental Sort, Index Scan]`. **Incremental Sort** (PG13+) appears
+when the input is already ordered by a *prefix* of the required keys, so
+Postgres sorts only within each group of equal values and can start returning
+rows before consuming the whole input. Cheaper than a full `Sort` — and still a
+sort. An exact-equality check for `"Sort"` passes right over it.
+
+**Partial indexes — `PartialIndexIT`.** `idx_outbox_unpublished` covers
+`(id) WHERE NOT published`, which is the only query the relay ever runs. An
+outbox grows forever but its interesting set is always the small unrelayed tail,
+so the index stays proportional to the *backlog* rather than to history. The
+catch: the planner can only use it when it can prove the query's predicate
+implies the index's, so a query that doesn't mention `published` silently gets a
+sequential scan — which the second test asserts, because knowing when it *won't*
+apply is the half people miss.
+
+**Keyset pagination — `KeysetPaginationIT`.** `OFFSET 50000` reads fifty
+thousand rows through the index, discards every one, and returns the next twenty:
+O(offset + size), so the endpoint gets steadily worse in a way that never shows
+up in testing against ten rows. Seeking with a row comparison —
+`(created_at, id) < (:ts, :id)` — is O(page size) at any depth. Written as a row
+constructor rather than `created_at < ? OR (created_at = ? AND id < ?)`, which is
+logically identical but makes the planner choose between two branches instead of
+seeking once. `id` is in the key so the order is **total**: with `created_at`
+alone, rows sharing a timestamp have no defined order between pages, so one can
+be shown twice and another skipped. The two are compared on **buffers read**,
+and the honest cost is stated — no page numbers and no total, because there is no
+`COUNT`, which is why `/postings` and `/postings/seek` both exist.
+
+**Interview tip:** the test that compares the two pagination styles originally
+failed, and the reason is worth more than the test. Reading the cursor with raw
+JDBC (`getTimestamp().toInstant()`) and feeding that `Instant` back through a
+Hibernate-bound parameter compares two different interpretations of a
+`TIMESTAMP WITHOUT TIME ZONE` — the driver resolves against the JVM default zone,
+Hibernate against its own — and the seek landed hours away from the offset page.
+Which is the argument for `TIMESTAMPTZ` over `TIMESTAMP` for anything a cursor is
+built from.
+
+---
+
 ## Summary for the interview
 
 1. **Ledger as source of truth** - immutable postings, not a mutable balance
@@ -352,18 +429,21 @@ src/main/java/com/postgresbank/
   common/               Account, Posting, Transfer, Outbox entities + repositories, LedgerService, AccountController
   phase1_isolation/     JointOverdraftTransactionalOps, JointOverdraftService, OverdraftController
   phase2_ledger/        TransferTransactionalOps, TransferService, TransferController
-  phase3_coordination/  RefundService, OutboxRelay, PaymentJob, JobRunner, CoordinationController
-  phase4_performance/   AccountHistoryService, PostingHistoryController
+  phase3_coordination/  RefundService, OutboxRelay(+TransactionalOps), PaymentJob, JobRunner, CoordinationController
+  phase4_performance/   AccountHistoryService, PostingHistoryController (offset + seek pagination)
 src/main/resources/
   application.yml       datasource, hibernate.generate_statistics (needed by NPlusOneIT)
-  schema.sql            accounts / transfers / postings / outbox / payment_jobs
+  schema.sql            accounts / transfers / postings / outbox / payment_jobs + indexes and the amount CHECK
 src/test/java/com/postgresbank/
   TestContainerConfig.java          singleton Postgres container shared by every IT
   testsupport/TestSupport.java      shared account-creation + pg_stat-counter helpers
+  testsupport/ExplainSupport.java   EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) parsed into an assertable plan
+  testsupport/IndexFixture.java     100k-posting fixture, seeded once per container
   phase1_isolation/WriteSkewIT.java
   phase2_ledger/{HotUpdateIT,TupleVersionIT,IdempotencyIT}.java
   phase3_coordination/{AdvisoryLockIT,OutboxIT,SkipLockedIT}.java
   phase4_performance/{NPlusOneIT,PaginationIT,BloatIT,LongTxnBloatIT}.java
+  phase5_indexing/{IndexPlanIT,CompositeOrderIT,PartialIndexIT,KeysetPaginationIT}.java
 ```
 
 ## Commands

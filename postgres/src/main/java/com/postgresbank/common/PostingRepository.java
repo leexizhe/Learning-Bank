@@ -1,6 +1,8 @@
 package com.postgresbank.common;
 
+import java.time.Instant;
 import java.util.Collection;
+import java.util.List;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -18,6 +20,43 @@ public interface PostingRepository extends JpaRepository<Posting, Long> {
     long sumAmountByAccountIdIn(@Param("accountIds") Collection<Long> accountIds);
 
     Page<Posting> findByAccountId(long accountId, Pageable pageable);
+
+    /**
+     * Keyset (or "seek") pagination: instead of counting past N rows, jump
+     * straight to the last row the caller saw and read forward from there.
+     *
+     * <p>The predicate is a <b>row comparison</b>, {@code (created_at, id) <
+     * (:ts, :id)}, not {@code created_at < :ts OR (created_at = :ts AND id <
+     * :id)}. The two are logically identical and only the first is a single
+     * range condition the B-tree can seek on directly — the OR form makes the
+     * planner choose between two branches and usually costs a bitmap or a sort.
+     * Written natively because JPQL has no row-constructor comparison.
+     *
+     * <p>{@code id} is in the key so the order is <b>total</b>. With
+     * {@code created_at} alone, rows sharing a timestamp have no defined order
+     * between pages, so one can be shown twice and another skipped — the bug
+     * that makes offset pagination look "mostly fine" until it silently isn't.
+     *
+     * <p>Cost is O(page size) at any depth, against OFFSET's O(offset + size).
+     * The trade: no page numbers and no "jump to page 500", because there is no
+     * count. Feeds and statements can live with that; a table with a page picker
+     * cannot, which is why both endpoints exist here rather than one replacing
+     * the other.
+     */
+    @Query(
+            value =
+                    """
+                    select * from postings
+                    where account_id = :accountId and (created_at, id) < (:afterCreatedAt, :afterId)
+                    order by created_at desc, id desc
+                    limit :size
+                    """,
+            nativeQuery = true)
+    List<Posting> seekByAccountId(
+            @Param("accountId") long accountId,
+            @Param("afterCreatedAt") Instant afterCreatedAt,
+            @Param("afterId") long afterId,
+            @Param("size") int size);
 
     long countByTransferId(Long transferId);
 }
