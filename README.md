@@ -45,6 +45,13 @@ Kafka, so all three apps can run at once on 8081 / 8082 / 8083.
 only runs on first creation of the volume — after editing it, use
 `docker compose -f docker/docker-compose.yml down -v` to re-run it.
 
+The same `down -v` is **required once** after the Postgres 16 → 18 bump: a
+`pgdata` directory initialised by an older major version refuses to start under
+a newer one (`database files are incompatible with server`). Postgres has no
+in-place major upgrade without `pg_upgrade`, which is worth knowing for its own
+sake — it's why a production major-version upgrade is a planned migration rather
+than a new image tag.
+
 ## Adding a topic
 
 Create the directory, add a `pom.xml` inheriting from the root, and add one

@@ -10,7 +10,7 @@ being able to say *why* each line is there is the interview.
 Every concept here (MVCC, row locks, advisory locks, vacuum, WAL) only means
 something against a **real Postgres**, so - like the kafka module - this project
 has no unit-test layer at all. Every test is a **Testcontainers integration
-test** against a real `postgres:16` instance, and several go further and read
+test** against a real `postgres:18` instance, and several go further and read
 Postgres's own internal counters (`pg_stat_user_tables`, `ctid`) directly,
 rather than just trusting that a fix "should" work.
 
