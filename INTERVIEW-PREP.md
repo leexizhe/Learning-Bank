@@ -23,6 +23,53 @@ claim. Look anything external up fresh at the source (openjdk.org/jeps,
 kafka.apache.org, postgresql.org/docs) rather than trusting this file's
 recollection of it.
 
+---
+
+## Status — what has since been closed
+
+This document drove a round of work on the repo. Closed since it was written,
+each with tests:
+
+| § | Item | Now |
+|---|---|---|
+| 1.1 | Consumer acks before the publish is confirmed | Fixed — transactional outbox in the kafka module (`OutboxIT`, `OutboxRedeliveryIT`) |
+| 1.2 | `retries: 3` weakens the idempotent producer | Fixed — `delivery.timeout.ms` |
+| 1.3 | Wrong JEP number | Fixed — 499 → 505 in all four sites |
+| 1.4 | Postgres version drift | Bumped 16 → 18 across all three modules |
+| 2.2 | [P0] Live-coding classics missing | `phase7_primitives` — rate limiters, LRU, `Condition` buffer, pool |
+| 2.2 | [P0] JMM used but never stated | `phase8_memorymodel` |
+| 2.2 | [P1] ABA, [P1] `LongAdder` | `AbaProblemDemo`, `CounterContention` |
+| 2.3 | Deterministic deadlock test | `NaiveTransferServiceDeadlockTest` via `ThreadMXBean` |
+| 3.2 | [P0] Rebalancing not covered | `RebalanceIT` + a README section |
+| 3.2 | [P0] Retry topic breaks ordering | `OrderingUnderRetryIT` — proved, not just named |
+| 4.2 | [P0] Indexes and query plans — "the single largest hole" | `phase5_indexing`, plans asserted via `EXPLAIN … FORMAT JSON` |
+| 4.2 | [P0] Balance is `SUM(postings)` forever | `phase6_operations` — snapshots |
+| 4.2 | [P1] Enforcing debits = credits in the DB | Deferred constraint trigger |
+| 4.2 | [P1] Keyset pagination | Query + endpoint + `KeysetPaginationIT` |
+| 4.2 | [P1] Connection pooling | First HikariCP config, with the sizing rationale |
+| 4.2 | [P1] Postgres-level deadlocks | `PgDeadlockIT` (`40P01`) |
+| 5 | CI | `.github/workflows/build.yml` + badge |
+| 5 | Testing philosophy written down | Root README |
+| 6 | System design narrative | `DESIGN.md` |
+
+**Three places this document was wrong**, found by building it:
+
+1. §2.3's `UnsafePublication` "run it a million times and it fires" — it doesn't,
+   on x86. 200k reads, zero sightings. The phase now asserts the guarantee and
+   only reports the anomaly, which is a better lesson than the test would have been.
+2. §2.3's mirror `assertThat(deadlocked).isNull()` — `findDeadlockedThreads()` is
+   JVM-global and Surefire shares one fork, so it fails or passes on class
+   ordering. Both assertions are now scoped to their own thread ids.
+3. §4.3's raw DDL — `schema.sql` replays on every startup, and Spring's
+   `ScriptUtils` splits on semicolons without understanding dollar quoting, so
+   `DO $$ … $$` blocks and `$$`-quoted function bodies are chopped in half.
+
+Still open: §3.2's EOS/log-compaction/schema-evolution material, §4.2's
+partitioning and replication, §5's observability section, and the Kafka 4.x bump
+that would make KIP-848 and share groups demonstrable rather than talking points.
+
+---
+
 **How to use it:** each topic section has the same four parts —
 
 1. **Already defensible** — what you can claim today without hedging.

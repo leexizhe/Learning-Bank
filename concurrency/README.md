@@ -560,3 +560,29 @@ src/test/java/com/concurrencybank/
 Docker Engine 29+ needs `api.version=1.44` in
 `src/test/resources/docker-java.properties` (already there) or Testcontainers
 gets misleading empty 400s from the daemon.
+
+---
+
+## Questions this module answers
+
+Skim this if you have 90 seconds. Each phase exists because of a question.
+
+| Question | Where |
+|---|---|
+| Why isn't `count++` atomic, and does `volatile` fix it? | phase 1, phase 8 |
+| Implement a thread-safe account with `withdraw`. Now without locks. | phase 1 (`AtomicAccount`) |
+| When does CAS succeed and still give you the wrong answer? | phase 1 (`AbaProblemDemo`) |
+| `AtomicLong` or `LongAdder` for this counter? | phase 6 (`CounterContention`) |
+| Two threads transfer between the same two accounts, opposite directions. | phase 2 |
+| Prove it actually deadlocks. | phase 2 (`NaiveTransferServiceDeadlockTest`) |
+| 10,000 concurrent requests, three downstream calls each. | phase 3 |
+| Virtual threads: when do they help, and when do they change nothing? | phase 3 |
+| Three ways to fan out — which cancels correctly? | phase 3 |
+| Why is `synchronized("someString")` a bug? | phase 5 |
+| Double-checked locking: why is `volatile` load-bearing? | phase 5 |
+| Write a rate limiter. Token bucket or sliding window? | phase 7 |
+| Write a thread-safe LRU cache. Now make it concurrent. | phase 7 |
+| Bounded blocking queue with `wait`/`notify`. Now with `Condition`s. | phase 6 → phase 7 |
+| Write a connection pool with borrow timeout. | phase 7 (`BorrowablePool`) |
+| Why is a `final` field visible without synchronization when a plain one isn't? | phase 8 |
+| Why might a loop never see another thread's write? | phase 8 (`StopFlagVisibility`) |

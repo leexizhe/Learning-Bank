@@ -452,3 +452,25 @@ src/test/java/com/kafkabank/
 Docker Engine 29+ needs `api.version=1.44` in
 `src/test/resources/docker-java.properties` (already there) or Testcontainers
 gets misleading empty 400s from the daemon.
+
+---
+
+## Questions this module answers
+
+| Question | Where |
+|---|---|
+| How do you guarantee a payment is processed exactly once? | the reliability story; `IdempotencyIT` |
+| Where exactly do you commit the offset, and why there? | `ack-mode: manual_immediate`; `PaymentConsumer` |
+| Consumer idempotence vs producer idempotence — different things? | the reliability story |
+| Your DB commit and your Kafka publish aren't atomic. What now? | the outbox section; `OutboxIT` |
+| The process dies between the commit and the publish. | `OutboxRedeliveryIT` |
+| How do you keep events for one account in order? | partition key; `OrderingIT` |
+| ...and what breaks that guarantee? | `OrderingUnderRetryIT` |
+| One account is 50% of your traffic. | trade-offs; hot-partition discussion |
+| What happens during a rebalance? Name the three timeouts. | the rebalancing section; `RebalanceIT` |
+| Eager vs cooperative rebalancing, and how do you migrate? | the rebalancing section |
+| Retry without blocking the partition. | `@RetryableTopic`; `DeadLetterIT` |
+| A business decline isn't a failure — how do you model that? | "rejected is not failed"; `InsufficientFundsIT` |
+| `acks=all` — is that enough for durability? | `KafkaTopicConfig`, `min.insync.replicas` |
+| Why is `max.in.flight=5` safe here? | `application.yml` producer block |
+| How many partitions, and can you change it later? | `KafkaTopicConfig` javadoc |

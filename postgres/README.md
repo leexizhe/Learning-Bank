@@ -543,3 +543,28 @@ src/test/java/com/postgresbank/
 Docker Engine 29+ needs `api.version=1.44` in
 `src/test/resources/docker-java.properties` (already there) or
 Testcontainers gets misleading empty 400s from the daemon.
+
+---
+
+## Questions this module answers
+
+| Question | Where |
+|---|---|
+| Two withdrawals against a shared limit both succeed. Why? | phase 1 — write skew, `WriteSkewIT` |
+| What does SERIALIZABLE actually cost you? | phase 1 — SSI, `40001`, retry loops |
+| Where do you store a balance? | phase 2 — nowhere; it's `SUM(postings)` |
+| How is idempotency actually enforced? | phase 2 — a UNIQUE constraint, `IdempotencyIT` |
+| Does an UPDATE rewrite the row in place? | phase 2 — `ctid`, `TupleVersionIT` |
+| What is a HOT update and when do you lose it? | phase 2 — `HotUpdateIT` |
+| Build a job queue that several workers can share. | phase 3 — `SKIP LOCKED`, `SkipLockedIT` |
+| Advisory locks — session or transaction scoped, and why care? | phase 3 — `RefundService` |
+| The table grows but the row count is flat. | phase 4 — bloat, `LongTxnBloatIT` |
+| Why didn't VACUUM reclaim anything? | phase 4 — the vacuum horizon |
+| Find the N+1 without guessing. | phase 4 — Hibernate `Statistics` |
+| Why isn't Postgres using my index? | phase 5 — `IndexPlanIT` |
+| What order should a composite index's columns be in? | phase 5 — `CompositeOrderIT` |
+| Page 5000 of this endpoint is slow. | phase 5 — keyset pagination |
+| Read a balance in a millisecond at 10M postings. | phase 6 — `SnapshotIT` |
+| Enforce debits = credits in the database. | phase 6 — deferred constraint trigger |
+| Two transactions deadlock in Postgres. Does it hang? | phase 6 — `40P01`, `PgDeadlockIT` |
+| Add an index to a hot table without downtime. | phase 6 — `ConcurrentIndexIT` |
