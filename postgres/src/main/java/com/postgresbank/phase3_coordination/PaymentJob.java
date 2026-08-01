@@ -15,25 +15,25 @@ import lombok.Setter;
 @Table(name = "payment_jobs")
 public class PaymentJob {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+  @Id
+  @GeneratedValue(strategy = GenerationType.IDENTITY)
+  private Long id;
 
-    @Column(nullable = false)
-    private String payload;
+  @Column(nullable = false)
+  private String payload;
 
-    @Setter
-    @Column(nullable = false)
-    private String status;
+  @Setter
+  @Column(nullable = false)
+  private String status;
 
-    @Column(name = "created_at", nullable = false)
-    private Instant createdAt;
+  @Column(name = "created_at", nullable = false)
+  private Instant createdAt;
 
-    protected PaymentJob() {}
+  protected PaymentJob() {}
 
-    public PaymentJob(String payload) {
-        this.payload = payload;
-        this.status = "PENDING";
-        this.createdAt = Instant.now();
-    }
+  public PaymentJob(String payload) {
+    this.payload = payload;
+    this.status = "PENDING";
+    this.createdAt = Instant.now();
+  }
 }

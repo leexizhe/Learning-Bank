@@ -20,52 +20,50 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
- * The UNIQUE constraint on {@code transfers.idempotency_key} is the actual
- * guarantee here, not application logic - two requests racing to insert the
- * same key can only ever have one winner at the database level, no matter
- * how the JVM schedules the two threads. This fires the exact same transfer
- * twice, concurrently, and proves it posts exactly once.
+ * The UNIQUE constraint on {@code transfers.idempotency_key} is the actual guarantee here, not
+ * application logic - two requests racing to insert the same key can only ever have one winner at
+ * the database level, no matter how the JVM schedules the two threads. This fires the exact same
+ * transfer twice, concurrently, and proves it posts exactly once.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class IdempotencyIT extends TestContainerConfig {
 
-    @Autowired
-    private AccountRepository accounts;
+  @Autowired private AccountRepository accounts;
 
-    @Autowired
-    private PostingRepository postings;
+  @Autowired private PostingRepository postings;
 
-    @Autowired
-    private TransferService transferService;
+  @Autowired private TransferService transferService;
 
-    private final ExecutorService pool = Executors.newFixedThreadPool(2);
+  private final ExecutorService pool = Executors.newFixedThreadPool(2);
 
-    @Test
-    void concurrentRetriesOfTheSameRequestPostOnlyOnce() throws Exception {
-        Account from = openAccount(accounts);
-        Account to = openAccount(accounts);
-        String idempotencyKey = UUID.randomUUID().toString();
+  @Test
+  void concurrentRetriesOfTheSameRequestPostOnlyOnce() throws Exception {
+    Account from = openAccount(accounts);
+    Account to = openAccount(accounts);
+    String idempotencyKey = UUID.randomUUID().toString();
 
-        CountDownLatch bothStarting = new CountDownLatch(2);
-        Callable<TransferResult> attempt = () -> {
-            bothStarting.countDown();
-            bothStarting.await(2, TimeUnit.SECONDS);
-            return transferService.transfer(idempotencyKey, from.getId(), to.getId(), 250);
+    CountDownLatch bothStarting = new CountDownLatch(2);
+    Callable<TransferResult> attempt =
+        () -> {
+          bothStarting.countDown();
+          bothStarting.await(2, TimeUnit.SECONDS);
+          return transferService.transfer(idempotencyKey, from.getId(), to.getId(), 250);
         };
 
-        Future<TransferResult> first = pool.submit(attempt);
-        Future<TransferResult> second = pool.submit(attempt);
+    Future<TransferResult> first = pool.submit(attempt);
+    Future<TransferResult> second = pool.submit(attempt);
 
-        TransferResult r1 = first.get(10, TimeUnit.SECONDS);
-        TransferResult r2 = second.get(10, TimeUnit.SECONDS);
+    TransferResult r1 = first.get(10, TimeUnit.SECONDS);
+    TransferResult r2 = second.get(10, TimeUnit.SECONDS);
 
-        assertThat(r1.transferId()).isEqualTo(r2.transferId());
-        assertThat(List.of(r1.alreadyApplied(), r2.alreadyApplied()))
-                .as("exactly one attempt should be the original, the other should observe it already applied")
-                .containsExactlyInAnyOrder(false, true);
+    assertThat(r1.transferId()).isEqualTo(r2.transferId());
+    assertThat(List.of(r1.alreadyApplied(), r2.alreadyApplied()))
+        .as(
+            "exactly one attempt should be the original, the other should observe it already applied")
+        .containsExactlyInAnyOrder(false, true);
 
-        assertThat(postings.countByTransferId(r1.transferId()))
-                .as("double-entry: exactly one debit + one credit, never four")
-                .isEqualTo(2);
-    }
+    assertThat(postings.countByTransferId(r1.transferId()))
+        .as("double-entry: exactly one debit + one credit, never four")
+        .isEqualTo(2);
+  }
 }

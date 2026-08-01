@@ -12,28 +12,28 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class AccountController {
 
-    private final AccountRepository accounts;
-    private final LedgerService ledger;
+  private final AccountRepository accounts;
+  private final LedgerService ledger;
 
-    public AccountController(AccountRepository accounts, LedgerService ledger) {
-        this.accounts = accounts;
-        this.ledger = ledger;
-    }
+  public AccountController(AccountRepository accounts, LedgerService ledger) {
+    this.accounts = accounts;
+    this.ledger = ledger;
+  }
 
-    @ResponseStatus(HttpStatus.CREATED)
-    @PostMapping("/api/accounts")
-    public AccountView open(@RequestBody CreateAccountRequest request) {
-        Account saved = accounts.save(new Account(request.owner()));
-        return new AccountView(saved.getId(), saved.getOwner(), 0);
-    }
+  @ResponseStatus(HttpStatus.CREATED)
+  @PostMapping("/api/accounts")
+  public AccountView open(@RequestBody CreateAccountRequest request) {
+    Account saved = accounts.save(new Account(request.owner()));
+    return new AccountView(saved.getId(), saved.getOwner(), 0);
+  }
 
-    @GetMapping("/api/accounts/{id}")
-    public AccountView view(@PathVariable long id) {
-        Account account = accounts.findById(id).orElseThrow();
-        return new AccountView(account.getId(), account.getOwner(), ledger.balanceOf(id));
-    }
+  @GetMapping("/api/accounts/{id}")
+  public AccountView view(@PathVariable long id) {
+    Account account = accounts.findById(id).orElseThrow();
+    return new AccountView(account.getId(), account.getOwner(), ledger.balanceOf(id));
+  }
 
-    public record CreateAccountRequest(@NotBlank String owner) {}
+  public record CreateAccountRequest(@NotBlank String owner) {}
 
-    public record AccountView(Long id, String owner, long balanceMinor) {}
+  public record AccountView(Long id, String owner, long balanceMinor) {}
 }

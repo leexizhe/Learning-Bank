@@ -15,33 +15,35 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class AccountController {
 
-    private final AccountRepository accounts;
+  private final AccountRepository accounts;
 
-    public AccountController(AccountRepository accounts) {
-        this.accounts = accounts;
-    }
+  public AccountController(AccountRepository accounts) {
+    this.accounts = accounts;
+  }
 
-    public record AccountView(Long id, String owner, long balanceMinor) {}
+  public record AccountView(Long id, String owner, long balanceMinor) {}
 
-    @GetMapping("/api/accounts")
-    @Transactional(readOnly = true)
-    public List<AccountView> listAll() {
-        return accounts.findAll().stream().map(AccountController::toView).toList();
-    }
+  @GetMapping("/api/accounts")
+  @Transactional(readOnly = true)
+  public List<AccountView> listAll() {
+    return accounts.findAll().stream().map(AccountController::toView).toList();
+  }
 
-    @GetMapping("/api/accounts/{id}")
-    @Transactional(readOnly = true)
-    public AccountView getOne(@PathVariable Long id) {
-        return accounts.findById(id).map(AccountController::toView).orElseThrow(
-                () -> new AccountNotFoundException(id));
-    }
+  @GetMapping("/api/accounts/{id}")
+  @Transactional(readOnly = true)
+  public AccountView getOne(@PathVariable Long id) {
+    return accounts
+        .findById(id)
+        .map(AccountController::toView)
+        .orElseThrow(() -> new AccountNotFoundException(id));
+  }
 
-    private static AccountView toView(Account account) {
-        return new AccountView(account.getId(), account.getOwner(), account.getBalanceMinor());
-    }
+  private static AccountView toView(Account account) {
+    return new AccountView(account.getId(), account.getOwner(), account.getBalanceMinor());
+  }
 
-    @ExceptionHandler(AccountNotFoundException.class)
-    public ProblemDetail handleAccountNotFound(AccountNotFoundException e) {
-        return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, e.getMessage());
-    }
+  @ExceptionHandler(AccountNotFoundException.class)
+  public ProblemDetail handleAccountNotFound(AccountNotFoundException e) {
+    return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, e.getMessage());
+  }
 }

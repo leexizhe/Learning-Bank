@@ -18,26 +18,29 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class AccountController {
 
-    private final AccountRepository accounts;
+  private final AccountRepository accounts;
 
-    public AccountController(AccountRepository accounts) {
-        this.accounts = accounts;
-    }
+  public AccountController(AccountRepository accounts) {
+    this.accounts = accounts;
+  }
 
-    @PostMapping("/api/accounts")
-    @ResponseStatus(HttpStatus.CREATED)
-    public AccountResponse create(@Valid @RequestBody CreateAccountRequest request) {
-        Account saved = accounts.save(new Account(request.owner(), request.initialBalanceMinor()));
-        return AccountResponse.from(saved);
-    }
+  @PostMapping("/api/accounts")
+  @ResponseStatus(HttpStatus.CREATED)
+  public AccountResponse create(@Valid @RequestBody CreateAccountRequest request) {
+    Account saved = accounts.save(new Account(request.owner(), request.initialBalanceMinor()));
+    return AccountResponse.from(saved);
+  }
 
-    @GetMapping("/api/accounts")
-    public List<AccountResponse> listAll() {
-        return accounts.findAll().stream().map(AccountResponse::from).toList();
-    }
+  @GetMapping("/api/accounts")
+  public List<AccountResponse> listAll() {
+    return accounts.findAll().stream().map(AccountResponse::from).toList();
+  }
 
-    @GetMapping("/api/accounts/{id}")
-    public AccountResponse getOne(@PathVariable Long id) {
-        return accounts.findById(id).map(AccountResponse::from).orElseThrow(() -> new AccountNotFoundException(id));
-    }
+  @GetMapping("/api/accounts/{id}")
+  public AccountResponse getOne(@PathVariable Long id) {
+    return accounts
+        .findById(id)
+        .map(AccountResponse::from)
+        .orElseThrow(() -> new AccountNotFoundException(id));
+  }
 }

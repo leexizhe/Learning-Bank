@@ -20,83 +20,80 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
- * TransferTransactionalOps writes the outbox row <em>first</em>, then the
- * {@code transfers} row that owns the idempotency-key uniqueness check (see
- * that class's javadoc). That ordering is what makes this test meaningful:
- * the losing attempt in a duplicate-key race gets as far as inserting its
- * outbox row before its transfer insert fails - if the outbox write weren't
- * in the same transaction as everything else, that row would survive the
- * rollback as an orphan event describing a transfer that never happened.
+ * TransferTransactionalOps writes the outbox row <em>first</em>, then the {@code transfers} row
+ * that owns the idempotency-key uniqueness check (see that class's javadoc). That ordering is what
+ * makes this test meaningful: the losing attempt in a duplicate-key race gets as far as inserting
+ * its outbox row before its transfer insert fails - if the outbox write weren't in the same
+ * transaction as everything else, that row would survive the rollback as an orphan event describing
+ * a transfer that never happened.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class OutboxIT extends TestContainerConfig {
 
-    @Autowired
-    private AccountRepository accounts;
+  @Autowired private AccountRepository accounts;
 
-    @Autowired
-    private TransferService transferService;
+  @Autowired private TransferService transferService;
 
-    @Autowired
-    private OutboxRepository outbox;
+  @Autowired private OutboxRepository outbox;
 
-    /**
-     * The transactional half, not {@link OutboxRelay} itself. Note that calling
-     * this from a test is an <b>external</b> call and therefore goes through the
-     * {@code @Transactional} proxy — which is exactly why this test kept passing
-     * while the scheduled path, which used to self-invoke, silently did nothing.
-     * See {@link OutboxRelayTransactionalOps} for the full story.
-     */
-    @Autowired
-    private OutboxRelayTransactionalOps relay;
+  /**
+   * The transactional half, not {@link OutboxRelay} itself. Note that calling this from a test is
+   * an <b>external</b> call and therefore goes through the {@code @Transactional} proxy — which is
+   * exactly why this test kept passing while the scheduled path, which used to self-invoke,
+   * silently did nothing. See {@link OutboxRelayTransactionalOps} for the full story.
+   */
+  @Autowired private OutboxRelayTransactionalOps relay;
 
-    private final ExecutorService pool = Executors.newFixedThreadPool(2);
+  private final ExecutorService pool = Executors.newFixedThreadPool(2);
 
-    @Test
-    void successfulTransferLeavesExactlyOneOutboxRow() {
-        Account from = openAccount(accounts);
-        Account to = openAccount(accounts);
-        String idempotencyKey = UUID.randomUUID().toString();
+  @Test
+  void successfulTransferLeavesExactlyOneOutboxRow() {
+    Account from = openAccount(accounts);
+    Account to = openAccount(accounts);
+    String idempotencyKey = UUID.randomUUID().toString();
 
-        transferService.transfer(idempotencyKey, from.getId(), to.getId(), 100);
+    transferService.transfer(idempotencyKey, from.getId(), to.getId(), 100);
 
-        assertThat(outbox.countByPayloadContaining(idempotencyKey)).isEqualTo(1);
-    }
+    assertThat(outbox.countByPayloadContaining(idempotencyKey)).isEqualTo(1);
+  }
 
-    @Test
-    void losingAttemptInADuplicateKeyRaceLeavesNoOrphanOutboxRow() throws Exception {
-        Account from = openAccount(accounts);
-        Account to = openAccount(accounts);
-        String idempotencyKey = UUID.randomUUID().toString();
+  @Test
+  void losingAttemptInADuplicateKeyRaceLeavesNoOrphanOutboxRow() throws Exception {
+    Account from = openAccount(accounts);
+    Account to = openAccount(accounts);
+    String idempotencyKey = UUID.randomUUID().toString();
 
-        CountDownLatch bothStarting = new CountDownLatch(2);
-        Callable<Void> attempt = () -> {
-            bothStarting.countDown();
-            bothStarting.await(2, TimeUnit.SECONDS);
-            transferService.transfer(idempotencyKey, from.getId(), to.getId(), 100);
-            return null;
+    CountDownLatch bothStarting = new CountDownLatch(2);
+    Callable<Void> attempt =
+        () -> {
+          bothStarting.countDown();
+          bothStarting.await(2, TimeUnit.SECONDS);
+          transferService.transfer(idempotencyKey, from.getId(), to.getId(), 100);
+          return null;
         };
 
-        Future<Void> first = pool.submit(attempt);
-        Future<Void> second = pool.submit(attempt);
-        first.get(10, TimeUnit.SECONDS);
-        second.get(10, TimeUnit.SECONDS);
+    Future<Void> first = pool.submit(attempt);
+    Future<Void> second = pool.submit(attempt);
+    first.get(10, TimeUnit.SECONDS);
+    second.get(10, TimeUnit.SECONDS);
 
-        assertThat(outbox.countByPayloadContaining(idempotencyKey))
-                .as("the loser's outbox insert should have rolled back with its failed transfer insert")
-                .isEqualTo(1);
-    }
+    assertThat(outbox.countByPayloadContaining(idempotencyKey))
+        .as("the loser's outbox insert should have rolled back with its failed transfer insert")
+        .isEqualTo(1);
+  }
 
-    @Test
-    void relayMarksPendingEventsPublished() {
-        Account from = openAccount(accounts);
-        Account to = openAccount(accounts);
-        transferService.transfer(UUID.randomUUID().toString(), from.getId(), to.getId(), 100);
+  @Test
+  void relayMarksPendingEventsPublished() {
+    Account from = openAccount(accounts);
+    Account to = openAccount(accounts);
+    transferService.transfer(UUID.randomUUID().toString(), from.getId(), to.getId(), 100);
 
-        int relayed = relay.relayOnce();
+    int relayed = relay.relayOnce();
 
-        assertThat(relayed).isGreaterThanOrEqualTo(1);
-        assertThat(outbox.findByPublishedFalse().stream().filter(o -> o.getPayload().contains(from.getId().toString())))
-                .isEmpty();
-    }
+    assertThat(relayed).isGreaterThanOrEqualTo(1);
+    assertThat(
+            outbox.findByPublishedFalse().stream()
+                .filter(o -> o.getPayload().contains(from.getId().toString())))
+        .isEmpty();
+  }
 }
