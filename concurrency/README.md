@@ -352,6 +352,73 @@ specifically, so it can wake the wrong kind and lose a signal.
 asserts every item submitted is consumed exactly once — no loss, no
 duplication.
 
+## Phase 7 — Live-coding primitives (`phase7_primitives/`)
+
+Five classes that get asked by name in 45-minute coding rounds. Same house rule
+as everywhere else — one class, one test that proves the property, javadoc that
+says *why*.
+
+**`TokenBucketRateLimiter`** — capacity tokens to spend, refilled at a steady
+rate, which gives you **burst then throttle**: a quiet caller may spend the whole
+bucket at once, then drops to the refill rate. There is deliberately **no timer
+thread**; refill is computed from elapsed nanos whenever someone asks, so an idle
+limiter costs nothing and a million per-API-key limiters cost a million small
+objects rather than a million scheduled tasks. The sharp edge is in `refill()`:
+it advances its marker by *exactly the time it converted into tokens*, never to
+`now`. Snapping to `now` discards the sub-token remainder on every call, and
+since callers poll far more often than one token-interval, the limiter quietly
+delivers less than its configured rate. `pollingFasterThanTheRefillRateDoesNotLeakElapsedTime`
+is the regression test for precisely that.
+
+**`SlidingWindowRateLimiter`** — the "why isn't a fixed window enough?" answer,
+made concrete. A fixed-window counter permits **twice the limit** across a
+boundary — 5 requests at 999ms and 5 more at 1001ms is 10 in two milliseconds,
+all of it inside the stated policy, and the thing you were protecting sees a 2×
+spike while your dashboard reports compliance. `cannotProduceTheDoubleRateBurstThatAFixedWindowAllows`
+asserts the sliding version can't. What it costs is O(limit) memory per limiter
+against the token bucket's O(1) — knowing *which* limiter to reach for is the
+actual question.
+
+**`ConcurrentLruCache`** — `LinkedHashMap` in access-order mode behind one lock.
+The trap is that in access-order mode **`get` is a mutating operation**: it
+relinks the entry as most-recent. So the obvious "optimisation" — a
+`ReadWriteLock` with `get` on the read lock — is a *bug*, because read locks are
+shared and several threads would relink the same intrusive list at once. If an
+interviewer offers you a read-write lock here, the answer is "not for LRU,
+because the read path writes". Follow that to its conclusion and you get the
+senior answer to *now make it concurrent*: **exact LRU and lock-free reads are
+mutually exclusive.** Caffeine and Guava resolve it by giving up exact LRU —
+accesses go into per-thread ring buffers and get replayed onto the eviction
+policy asynchronously.
+
+**`BoundedBufferWithCondition`** — `TellerQueue` rewritten on `ReentrantLock`
+plus two `Condition`s. **Read the two files side by side; the diff is the whole
+answer.** One intrinsic monitor means one wait set holding two kinds of waiter,
+which is why `TellerQueue` is *forced* to use `notifyAll()` and wake everyone to
+accomplish one handoff. Two `Condition`s split that wait set, so `notEmpty.signal()`
+wakes exactly one consumer and it is guaranteed to be a thread that can proceed —
+one wakeup per handoff instead of N. The subtlety most candidates miss: the
+`while` loop is **still required**, because `signal()` only moves a thread to the
+lock queue and `ReentrantLock` is non-fair by default, so a fresh caller can
+barge in and take the item first. And the price is real — `synchronized` releases
+its monitor on every exit path for free, whereas one missing `finally` here
+wedges every other thread forever. `TellerQueue` is the safer code; this is the
+faster and more expressive code. That trade is the answer, not "Condition is
+better".
+
+**`BorrowablePool`** — fixed-size pool of expensive objects. The semaphore *is*
+the pool; the queue is only storage. Borrowing takes a timeout, because an
+unbounded `acquire()` turns a saturated pool into a pile of parked request
+threads and the symptom in production is "the service is dead", not "the pool is
+full". Returning is not the caller's job — `borrow()` hands back an
+`AutoCloseable` lease so try-with-resources makes the `finally` impossible to
+forget. The sharp edge: `close()` is **idempotent**. Leaking a permit shrinks the
+pool until it stops working, which you notice; double-releasing *inflates* it
+past the size you configured, so the ceiling you built the pool to enforce
+quietly stops existing and `max_connections` tells you instead. Semaphores don't
+check that the releaser was the acquirer, which is what makes the guard
+necessary.
+
 ## Project layout
 
 ```
@@ -363,9 +430,10 @@ src/main/java/com/concurrencybank/
   phase4_ledger/         entity/repository/service/controller/dto/exception — the Postgres-backed ledger
   phase5_locking_gotchas/ ConcurrentLedger, StringLockBugDemo, LockStripedRegistry, BankRegistry, ExchangeRateService(Holder)
   phase6_async_patterns/  PinningDemo, AuditContext, TellerQueue
+  phase7_primitives/      TokenBucketRateLimiter, SlidingWindowRateLimiter, ConcurrentLruCache, BoundedBufferWithCondition, BorrowablePool
 src/test/java/com/concurrencybank/
   testutil/ConcurrencyHarness.java   shared "fire N threads at once" helper for stress tests
-  phase1-3,5-6 *Test.java             fast unit tests, no Docker
+  phase1-3,5-7 *Test.java             fast unit tests, no Docker
   phase4_ledger/*IT.java              Testcontainers integration tests (mvnw verify)
 ```
 
