@@ -8,6 +8,28 @@ spring:
     url: jdbc:postgresql://localhost:5432/postgresbank
     username: postgresbank
     password: postgresbank
+    hikari:
+      # Small pools usually beat large ones, and the reason is that a Postgres
+      # connection is an operating-system PROCESS, not a thread: each one costs
+      # memory and a share of the scheduler whether it is doing anything or not.
+      # Past the point where the CPUs and disks are saturated, more connections
+      # only add context switching and lock contention, so throughput goes down
+      # while latency goes up. The usual starting point is around
+      # (cores * 2) + effective_spindles, which for most services is nearer 10
+      # than 100.
+      #
+      # 20 here is a TEST-SUITE number, not a production one: SkipLockedIT alone
+      # runs 8 workers, and phase5/phase6 hold several raw JDBC connections open
+      # at once on purpose (long transactions, deliberate deadlocks, CREATE INDEX
+      # CONCURRENTLY racing inserts). Boot's default of 10 is enough to deadlock
+      # the suite against itself rather than against Postgres.
+      maximum-pool-size: 20
+      # Fail a connection request outright rather than parking a request thread
+      # forever when the pool is exhausted - the same reasoning as tryLock with a
+      # timeout, and the same reasoning as BorrowablePool in the concurrency
+      # module. An unbounded wait turns "the pool is full" into "the service is
+      # dead" with nothing in the logs to say which.
+      connection-timeout: 10000
   sql:
     init:
       mode: always
