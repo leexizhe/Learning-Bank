@@ -297,6 +297,83 @@ parts, one less insert per payment. Two tables wins on separation of concerns
 on symmetry with the postgres module's own `outbox`. It's a real trade, not an
 obvious call.
 
+## My own retry topic breaks my own ordering guarantee
+
+Two claims above are in **direct tension**, and noticing it is worth more than a
+design with no tension in it.
+
+This module promises per-account ordering (events keyed by `accountId`, proved by
+`OrderingIT`) *and* non-blocking retries via `@RetryableTopic`. But when event #2
+for an account fails, Spring republishes it to `payment-events-retry-300` and
+moves on — so #3 and #4 keep flowing on the main topic and are applied **first**.
+Per-account ordering is gone precisely in the failure case where it mattered.
+`OrderingUnderRetryIT` proves it: three payments, the second fails transiently,
+and the third takes the money the second was queued for.
+
+**There is no free fix — you pick:**
+
+- **Accept it**, and make the downstream commutative or idempotent. Fine for a
+  debit keyed on an event id; not fine for a state machine where "cancelled then
+  shipped" and "shipped then cancelled" differ.
+- **Block and retry in place**, accepting head-of-line blocking, within a
+  `max.poll.interval.ms` budget — the thing `@RetryableTopic` exists to avoid, so
+  this is a deliberate trade back.
+- **`Consumer.pause()` the partition** and retry with backoff. Keeps order at the
+  cost of throughput *for that partition only*, which is the middle ground.
+
+Two details the test surfaced that are worth carrying:
+
+- **"Non-blocking" retries still block briefly.** When the listener throws, Spring
+  publishes the record to the retry topic *on the consumer thread* — about 450ms
+  here. The first version of the test failed because the retried event beat the
+  following one by 9ms; the two were the same order of magnitude. It now fails
+  twice so the retry lands on the 600ms tier and the margin is a full second.
+- **Assert on a terminal state, never on ordering you observed.** Balances are
+  additive, so the final number is identical either way. Funding the account for
+  exactly one of two equal payments makes "which one was ACCEPTED" a terminal
+  fact that only one ordering can produce.
+
+## Rebalancing
+
+`RebalanceIT` stops the listener container, raises its concurrency and restarts
+it — a genuine leave-and-rejoin, not a simulation — while events are in flight,
+and asserts every account is debited exactly once. **What saves you is
+`processed_events`**, because a rebalance can absolutely redeliver a record whose
+offset had not yet been committed. Rebalancing is not an exactly-once mechanism;
+idempotency is what makes it survivable.
+
+**Three timeouts, three different failures** — worth having cold:
+
+| Setting | What it measures | What it means when it fires |
+|---|---|---|
+| `heartbeat.interval.ms` | liveness, from a background thread | nothing on its own — it feeds the next one |
+| `session.timeout.ms` | how long the coordinator waits for heartbeats | the process is presumed dead |
+| `max.poll.interval.ms` | how long your *processing* takes between polls | a healthy but slow consumer is evicted |
+
+That third one is why `@RetryableTopic` exists rather than sleeping in the
+listener: a long enough sleep gets you kicked out of the group mid-payment.
+
+**Eager vs cooperative.** The classic protocol is stop-the-world — every member
+revokes every partition, then the group reassigns, and nobody works in between,
+so a rolling deploy of N pods costs N full pauses. `CooperativeStickyAssignor`
+(now set in `application.yml`) revokes only the partitions that actually move.
+The operational answer is the upgrade path: you **cannot** flip a live group in
+one deploy, you roll out `[CooperativeSticky, Range]` first so every member
+speaks both, then drop `Range` in a second rollout.
+
+**Static membership (`group.instance.id`) is deliberately *not* configured**, and
+the comment in `application.yml` says why. It lets a restarting pod keep its
+partitions instead of triggering a rebalance — right in production, wrong here,
+because a member that really has gone away holds its partitions until
+`session.timeout.ms` elapses, and this suite starts and stops contexts constantly.
+
+**KIP-848**, for 2026 credibility: the next-generation protocol moves assignment
+off the clients into the broker-side coordinator, so rebalances become
+incremental and stop being stop-the-world. GA in Kafka **4.0** — brokers support
+it out of the box, but `classic` is still the *client* default, so a consumer
+opts in with `group.protocol=consumer`. This module is pinned to `apache/kafka:3.9.1`,
+so that stays a talking point rather than a demo.
+
 ## Trade-offs worth being able to defend
 
 - **Strong consistency for balances, eventual for reconciliation.** The debit
@@ -341,6 +418,8 @@ Postgres, or a record actually consumed off a topic. None of them mock anything.
 | `DeadLetterIT` | An unprocessable event reaches the DLT carrying its original topic and failure reason as headers |
 | `OutboxIT` | The result row is written in the *same* transaction as the debit: a successful payment leaves exactly one row, a failed one leaves none. And the relay drains what it finds |
 | `OutboxRedeliveryIT` | A result lost before its send lands is recovered from the outbox, and the redelivery that follows does not debit twice. Counts records rather than waiting for one — the result must appear **twice**, which no timing can fake |
+| `OrderingUnderRetryIT` | That this module's own retry topic breaks its own per-account ordering guarantee — a limitation, proved rather than hidden |
+| `RebalanceIT` | No record is lost or double-applied across a real leave-and-rejoin rebalance; the idempotency table is what saves you |
 
 ```bash
 ./mvnw -pl kafka verify
@@ -359,6 +438,7 @@ src/main/java/com/kafkabank/
   order/           OrderController + PaymentInitiationService  (produces payment-events)
   payment/         PaymentConsumer + PaymentProcessingService  (consumes it, owns balances)
                    PaymentOutboxRelay + ...RelayOps  (the outbox's two relays)
+                   SimulatedTransientFailure  (fault injection for OrderingUnderRetryIT)
   reconciliation/  ReconciliationConsumer + ReconciliationService (consumes BOTH topics)
 src/main/resources/
   application.yml  every Kafka setting, commented with why it's set that way
@@ -366,7 +446,7 @@ src/main/resources/
 src/test/java/com/kafkabank/
   TestContainerConfig.java  singleton Kafka (KRaft) + Postgres
   BaseKafkaIT.java          shared HTTP + topic-draining helpers
-  *IT.java                  the seven scenarios above
+  *IT.java                  the nine scenarios above
 ```
 
 Docker Engine 29+ needs `api.version=1.44` in

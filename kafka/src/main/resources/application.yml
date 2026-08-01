@@ -67,6 +67,26 @@ spring:
       properties:
         spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
         spring.json.trusted.packages: com.kafkabank.common
+        # Incremental rebalancing. The classic (eager) protocol is stop-the-world:
+        # every member revokes EVERY partition, the group reassigns, and nobody
+        # processes anything in between - so a rolling deploy of N pods causes N
+        # full pauses. Cooperative sticky revokes only the partitions that actually
+        # move, so consumers keep working on the ones they keep.
+        #
+        # The operational detail worth saying out loud: you cannot flip a live
+        # group from eager to cooperative in one deploy. You roll out
+        # [CooperativeSticky, Range] first so every member speaks both, then drop
+        # Range in a second rollout. Skip the two-step and the group fails to
+        # settle on a common protocol.
+        partition.assignment.strategy: org.apache.kafka.clients.consumer.CooperativeStickyAssignor
+        # NOTE deliberately no group.instance.id here, though static membership is
+        # the natural companion to the above: it lets a restarting pod keep its
+        # partitions across a restart instead of triggering a rebalance, by
+        # skipping the leave-group entirely. The cost is that a member that really
+        # has gone away holds its partitions until session.timeout.ms elapses - and
+        # this test suite starts and stops application contexts constantly, so
+        # enabling it globally would make every IT after a restart slower and
+        # flakier. Right answer in production, wrong answer here; see RebalanceIT.
 
     listener:
       # THE reliability setting in this project. With the default (BATCH) ack mode

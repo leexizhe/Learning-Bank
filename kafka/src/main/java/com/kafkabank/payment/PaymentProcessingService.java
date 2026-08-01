@@ -53,18 +53,21 @@ public class PaymentProcessingService {
     private final PaymentOutboxRepository outbox;
     private final ObjectMapper objectMapper;
     private final ApplicationEventPublisher events;
+    private final SimulatedTransientFailure simulatedFailure;
 
     public PaymentProcessingService(
             AccountRepository accounts,
             ProcessedEventRepository processedEvents,
             PaymentOutboxRepository outbox,
             ObjectMapper objectMapper,
-            ApplicationEventPublisher events) {
+            ApplicationEventPublisher events,
+            SimulatedTransientFailure simulatedFailure) {
         this.accounts = accounts;
         this.processedEvents = processedEvents;
         this.outbox = outbox;
         this.objectMapper = objectMapper;
         this.events = events;
+        this.simulatedFailure = simulatedFailure;
     }
 
     /**
@@ -73,6 +76,12 @@ public class PaymentProcessingService {
      */
     @Transactional
     public void process(PaymentInitiated event) {
+        // A no-op unless a test marked this event to fail transiently. Ahead of the
+        // idempotency check on purpose, so the failed attempt writes nothing and
+        // the retry is a genuine reprocessing. See SimulatedTransientFailure for
+        // why the fault has to live here rather than in a mock.
+        simulatedFailure.failFirstDeliveriesOf(event);
+
         // The idempotency check. This read is only an optimization — it makes the
         // common duplicate case cheap. The real guarantee is the primary key on
         // processed_events.event_id: two concurrent deliveries can both pass this
