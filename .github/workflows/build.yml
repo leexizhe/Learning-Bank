@@ -17,12 +17,12 @@ jobs:
     timeout-minutes: 45
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # JDK 25 exactly, not "25 or later". The concurrency module compiles with
       # --enable-preview, and preview class files are pinned to the feature
       # release that produced them - they refuse to load on 26.
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '25'
