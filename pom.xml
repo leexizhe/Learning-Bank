@@ -19,6 +19,7 @@
     <description>Interview-prep banking projects: one module per topic, one shared build</description>
 
     <modules>
+        <module>acra</module>
         <module>concurrency</module>
         <module>kafka</module>
         <module>postgres</module>
@@ -123,7 +124,7 @@
                 <version>3.8.0</version>
                 <configuration>
                     <java>
-                        <googleJavaFormat/>
+                        <palantirJavaFormat/>
                     </java>
                 </configuration>
                 <executions>

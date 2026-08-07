@@ -20,85 +20,70 @@ spring:
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
-      # acks=all: the leader waits for every in-sync replica to persist the record
-      # before acknowledging. acks=1 (leader only) can silently lose a write if the
-      # leader dies before followers catch up - unacceptable for money movement.
+      # acks=all: the leader waits for every in-sync replica to persist the record before acknowledging. acks=1 (leader
+      # only) can silently lose a write if the leader dies before followers catch up - unacceptable for money movement.
       acks: all
       # NOTE there is deliberately no `retries` here. With enable.idempotence=true
-      # Kafka's own default is retries=Integer.MAX_VALUE, bounded in WALL-CLOCK time
-      # by delivery.timeout.ms rather than by an attempt count. Pinning retries to a
-      # small number (this used to say 3) means a partition leader election - a
-      # completely routine event - can burn through the attempts and surface as a
-      # send failure that would otherwise have healed itself: a LEADER_NOT_AVAILABLE
-      # comes back immediately and spends all three in ~300ms at the default
+      # Kafka's own default is retries=Integer.MAX_VALUE, bounded in WALL-CLOCK time by delivery.timeout.ms rather than
+      # by an attempt count. Pinning retries to a small number (this used to say 3) means a partition leader election -
+      # a completely routine event - can burn through the attempts and surface as a send failure that would otherwise
+      # have healed itself: a LEADER_NOT_AVAILABLE comes back immediately and spends all three in ~300ms at the default
       # retry.backoff.ms. The attempt count is the wrong dial; time is the right one.
       properties:
-        # Idempotent producer: Kafka de-duplicates retried sends using a producer id
-        # + sequence number, so a retry after a network blip can't write the record
-        # twice. This is PRODUCER-side dedup only - it says nothing about a consumer
-        # reading the same record twice, which is what the ProcessedEvent table is for.
+        # Idempotent producer: Kafka de-duplicates retried sends using a producer id + sequence number, so a retry after
+        # a network blip can't write the record twice. This is PRODUCER-side dedup only - it says nothing about a
+        # consumer reading the same record twice, which is what the ProcessedEvent table is for.
         enable.idempotence: true
-        # How long the producer keeps trying before giving up on a record, covering
-        # the whole journey: time in the accumulator, plus every retry, plus each
-        # attempt's request timeout. Must be >= linger.ms + request.timeout.ms
-        # (0 + 30000 here), so 120s leaves plenty of room. This is Kafka's own
-        # default - set explicitly because "which knob bounds delivery?" is the
-        # question, and the answer should be visible in the config, not implied.
+        # How long the producer keeps trying before giving up on a record, covering the whole journey: time in the
+        # accumulator, plus every retry, plus each attempt's request timeout. Must be >= linger.ms + request.timeout.ms
+        # (0 + 30000 here), so 120s leaves plenty of room. This is Kafka's own default - set explicitly because "which
+        # knob bounds delivery?" is the question, and the answer should be visible in the config, not implied.
         delivery.timeout.ms: 120000
-        # Only ordering-safe BECAUSE enable.idempotence is true above. The producer
-        # stamps each batch with a sequence number and the broker rejects anything
-        # out of order, so a retried batch can't overtake one sent after it. Turn
-        # idempotence off and >1 in flight plus retries can silently reorder records
-        # within a partition - which would break the per-account ordering guarantee
-        # this whole module is built on.
+        # Only ordering-safe BECAUSE enable.idempotence is true above. The producer stamps each batch with a sequence
+        # number and the broker rejects anything out of order, so a retried batch can't overtake one sent after it. Turn
+        # idempotence off and >1 in flight plus retries can silently reorder records within a partition - which would
+        # break the per-account ordering guarantee this whole module is built on.
         max.in.flight.requests.per.connection: 5
 
     consumer:
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      # ErrorHandlingDeserializer wraps the real deserializer so a malformed payload
-      # surfaces as a failed record the error handler can route to the DLT, instead of
-      # throwing inside the poll loop and getting retried forever (a "poison pill").
+      # ErrorHandlingDeserializer wraps the real deserializer so a malformed payload surfaces as a failed record the
+      # error handler can route to the DLT, instead of throwing inside the poll loop and getting retried forever (a
+      # "poison pill").
       value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
-      # A brand-new consumer group starts from the beginning of the topic rather than
-      # skipping everything already written.
+      # A brand-new consumer group starts from the beginning of the topic rather than skipping everything already
+      # written.
       auto-offset-reset: earliest
       # Offsets are committed explicitly in code (see ack-mode below), never on a timer.
       enable-auto-commit: false
       properties:
         spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
         spring.json.trusted.packages: com.kafkabank.common
-        # Incremental rebalancing. The classic (eager) protocol is stop-the-world:
-        # every member revokes EVERY partition, the group reassigns, and nobody
-        # processes anything in between - so a rolling deploy of N pods causes N
-        # full pauses. Cooperative sticky revokes only the partitions that actually
-        # move, so consumers keep working on the ones they keep.
+        # Incremental rebalancing. The classic (eager) protocol is stop-the-world: every member revokes EVERY partition,
+        # the group reassigns, and nobody processes anything in between - so a rolling deploy of N pods causes N full
+        # pauses. Cooperative sticky revokes only the partitions that actually move, so consumers keep working on the
+        # ones they keep.
         #
-        # The operational detail worth saying out loud: you cannot flip a live
-        # group from eager to cooperative in one deploy. You roll out
-        # [CooperativeSticky, Range] first so every member speaks both, then drop
-        # Range in a second rollout. Skip the two-step and the group fails to
-        # settle on a common protocol.
+        # The operational detail worth saying out loud: you cannot flip a live group from eager to cooperative in one
+        # deploy. You roll out [CooperativeSticky, Range] first so every member speaks both, then drop Range in a second
+        # rollout. Skip the two-step and the group fails to settle on a common protocol.
         partition.assignment.strategy: org.apache.kafka.clients.consumer.CooperativeStickyAssignor
         # NOTE deliberately no group.instance.id here, though static membership is
-        # the natural companion to the above: it lets a restarting pod keep its
-        # partitions across a restart instead of triggering a rebalance, by
-        # skipping the leave-group entirely. The cost is that a member that really
-        # has gone away holds its partitions until session.timeout.ms elapses - and
-        # this test suite starts and stops application contexts constantly, so
-        # enabling it globally would make every IT after a restart slower and
-        # flakier. Right answer in production, wrong answer here; see RebalanceIT.
+        # the natural companion to the above: it lets a restarting pod keep its partitions across a restart instead of
+        # triggering a rebalance, by skipping the leave-group entirely. The cost is that a member that really has gone
+        # away holds its partitions until session.timeout.ms elapses - and this test suite starts and stops application
+        # contexts constantly, so enabling it globally would make every IT after a restart slower and flakier. Right
+        # answer in production, wrong answer here; see RebalanceIT.
 
     listener:
-      # THE reliability setting in this project. With the default (BATCH) ack mode
-      # Spring commits offsets after the listener returns, on a schedule. If the app
-      # crashes between "record read" and "ledger updated", the offset may already be
-      # committed and that payment is silently lost. MANUAL_IMMEDIATE means nothing is
-      # committed until our code calls ack.acknowledge() - which we only do after the
-      # database transaction has committed.
+      # THE reliability setting in this project. With the default (BATCH) ack mode Spring commits offsets after the
+      # listener returns, on a schedule. If the app crashes between "record read" and "ledger updated", the offset may
+      # already be committed and that payment is silently lost. MANUAL_IMMEDIATE means nothing is committed until our
+      # code calls ack.acknowledge() - which we only do after the database transaction has committed.
       ack-mode: manual_immediate
-      # One listener thread per container. Bump toward the partition count to consume
-      # partitions in parallel; going above the partition count just idles threads,
-      # because a partition is only ever assigned to one consumer in a group.
+      # One listener thread per container. Bump toward the partition count to consume partitions in parallel; going
+      # above the partition count just idles threads, because a partition is only ever assigned to one consumer in a
+      # group.
       concurrency: 3
 
 server:

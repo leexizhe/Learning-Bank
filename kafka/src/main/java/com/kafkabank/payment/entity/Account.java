@@ -14,30 +14,31 @@ import lombok.Getter;
 @Table(name = "accounts")
 public class Account {
 
-  @Id
-  @GeneratedValue(strategy = GenerationType.IDENTITY)
-  private Long id;
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
 
-  @Column(nullable = false, unique = true)
-  private String owner;
+    @Column(nullable = false, unique = true)
+    private String owner;
 
-  @Column(name = "balance_minor", nullable = false)
-  private long balanceMinor;
+    @Column(name = "balance_minor", nullable = false)
+    private long balanceMinor;
 
-  @Version private long version;
+    @Version
+    private long version;
 
-  protected Account() {}
+    protected Account() {}
 
-  public Account(String owner, long balanceMinor) {
-    this.owner = owner;
-    this.balanceMinor = balanceMinor;
-  }
+    public Account(String owner, long balanceMinor) {
+        this.owner = owner;
+        this.balanceMinor = balanceMinor;
+    }
 
-  public boolean canDebit(long amountMinor) {
-    return balanceMinor >= amountMinor;
-  }
+    public boolean canDebit(long amountMinor) {
+        return balanceMinor >= amountMinor;
+    }
 
-  public void debit(long amountMinor) {
-    this.balanceMinor -= amountMinor;
-  }
+    public void debit(long amountMinor) {
+        this.balanceMinor -= amountMinor;
+    }
 }

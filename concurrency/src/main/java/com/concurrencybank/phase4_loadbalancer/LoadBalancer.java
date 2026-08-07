@@ -4,8 +4,8 @@ import java.util.List;
 
 public interface LoadBalancer {
 
-  /**
-   * @throws IllegalArgumentException if servers is empty
-   */
-  String pickServer(List<String> servers);
+    /**
+     * @throws IllegalArgumentException if servers is empty
+     */
+    String pickServer(List<String> servers);
 }

@@ -10,30 +10,31 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 @RestControllerAdvice
 public class ApiExceptionHandler {
 
-  @ExceptionHandler(AccountNotFoundException.class)
-  public ProblemDetail handleNotFound(AccountNotFoundException e) {
-    return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, e.getMessage());
-  }
+    @ExceptionHandler(AccountNotFoundException.class)
+    public ProblemDetail handleNotFound(AccountNotFoundException e) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, e.getMessage());
+    }
 
-  @ExceptionHandler(InsufficientFundsException.class)
-  public ProblemDetail handleInsufficientFunds(InsufficientFundsException e) {
-    return ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_ENTITY, e.getMessage());
-  }
+    @ExceptionHandler(InsufficientFundsException.class)
+    public ProblemDetail handleInsufficientFunds(InsufficientFundsException e) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_ENTITY, e.getMessage());
+    }
 
-  /**
-   * {@code Account.version} is what makes this reachable at all: every write still goes through
-   * {@code TransferService}'s pessimistic row lock, but if anything ever updated a row outside that
-   * path, this is the safety net that turns a silent lost update into a loud, retryable 409.
-   */
-  @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
-  public ProblemDetail handleOptimisticLockFailure(ObjectOptimisticLockingFailureException e) {
-    return ProblemDetail.forStatusAndDetail(
-        HttpStatus.CONFLICT, "Account was modified concurrently, retry the request");
-  }
+    /**
+     * {@code Account.version} is what makes this reachable at all: every write still goes through {@code
+     * TransferService}'s pessimistic row lock, but if anything ever updated a row outside that path, this is the safety
+     * net that turns a silent lost update into a loud, retryable 409.
+     */
+    @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
+    public ProblemDetail handleOptimisticLockFailure(ObjectOptimisticLockingFailureException e) {
+        return ProblemDetail.forStatusAndDetail(
+                HttpStatus.CONFLICT, "Account was modified concurrently, retry the request");
+    }
 
-  @ExceptionHandler(DataIntegrityViolationException.class)
-  public ProblemDetail handleConflict(DataIntegrityViolationException e) {
-    return ProblemDetail.forStatusAndDetail(
-        HttpStatus.CONFLICT, "Conflicting write: " + e.getMostSpecificCause().getMessage());
-  }
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ProblemDetail handleConflict(DataIntegrityViolationException e) {
+        return ProblemDetail.forStatusAndDetail(
+                HttpStatus.CONFLICT,
+                "Conflicting write: " + e.getMostSpecificCause().getMessage());
+    }
 }

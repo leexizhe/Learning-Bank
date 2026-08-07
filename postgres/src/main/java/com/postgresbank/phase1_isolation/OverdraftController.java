@@ -8,32 +8,31 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class OverdraftController {
 
-  private final JointOverdraftService overdraft;
+    private final JointOverdraftService overdraft;
 
-  public OverdraftController(JointOverdraftService overdraft) {
-    this.overdraft = overdraft;
-  }
-
-  /** {@code isolation=READ_COMMITTED} reproduces write skew; {@code SERIALIZABLE} prevents it. */
-  @PostMapping("/api/overdraft/withdraw")
-  public void withdraw(@RequestBody WithdrawRequest request) {
-    if (request.isolation() == IsolationChoice.SERIALIZABLE) {
-      overdraft.withdrawSerializable(
-          request.debitAccountId(), request.partnerAccountId(), request.amountMinor());
-    } else {
-      overdraft.withdrawReadCommitted(
-          request.debitAccountId(), request.partnerAccountId(), request.amountMinor());
+    public OverdraftController(JointOverdraftService overdraft) {
+        this.overdraft = overdraft;
     }
-  }
 
-  public enum IsolationChoice {
-    READ_COMMITTED,
-    SERIALIZABLE
-  }
+    /** {@code isolation=READ_COMMITTED} reproduces write skew; {@code SERIALIZABLE} prevents it. */
+    @PostMapping("/api/overdraft/withdraw")
+    public void withdraw(@RequestBody WithdrawRequest request) {
+        if (request.isolation() == IsolationChoice.SERIALIZABLE) {
+            overdraft.withdrawSerializable(request.debitAccountId(), request.partnerAccountId(), request.amountMinor());
+        } else {
+            overdraft.withdrawReadCommitted(
+                    request.debitAccountId(), request.partnerAccountId(), request.amountMinor());
+        }
+    }
 
-  public record WithdrawRequest(
-      long debitAccountId,
-      long partnerAccountId,
-      @Positive long amountMinor,
-      IsolationChoice isolation) {}
+    public enum IsolationChoice {
+        READ_COMMITTED,
+        SERIALIZABLE
+    }
+
+    public record WithdrawRequest(
+            long debitAccountId,
+            long partnerAccountId,
+            @Positive long amountMinor,
+            IsolationChoice isolation) {}
 }

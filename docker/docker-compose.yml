@@ -1,34 +1,58 @@
 name: learning-bank
 
-# One stack for every module. Tests don't use any of this - they get their own
-# throwaway containers from Testcontainers (see each module's TestContainerConfig).
-# This is only for `mvnw spring-boot:run`.
+# One stack for every module (four databases, one per module). Tests don't use any of this - they get their own
+# throwaway containers from Testcontainers (see each module's TestContainerConfig). This is only for `mvnw
+# spring-boot:run`.
 
 services:
   postgres:
     image: postgres:18-alpine
     container_name: learning-bank-postgres
     environment:
-      # The superuser exists only to run the init script below; each module
-      # connects as its own role against its own database.
+      # The superuser exists only to run the init script below; each module connects as its own role against its own
+      # database.
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_DB=postgres
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
-      - ./init:/docker-entrypoint-initdb.d:ro
+      # /var/lib/postgresql, NOT /var/lib/postgresql/data. The 18 images store data under a version-specific
+      # subdirectory (/var/lib/postgresql/18/docker) so that pg_upgrade --link can see both versions without crossing a
+      # mount boundary. A volume still mounted at the old path is detected as an "unused mount/volume" and the
+      # entrypoint refuses to start rather than silently initialising a second, empty cluster next to your data.
+      - pgdata:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
       timeout: 3s
       retries: 10
 
-  # Single-broker Kafka in KRaft mode - note there is no ZooKeeper container here.
-  # Modern Kafka stores cluster metadata in its own Raft quorum, so this one process
-  # is both "broker" (serves data) and "controller" (manages metadata, elects
-  # partition leaders). In production those roles run on separate nodes.
+  # Creates the per-module roles and databases, then exits. A one-shot service rather than a bind mount into
+  # /docker-entrypoint-initdb.d, because that directory is only read when the data directory is empty - so adding a
+  # module used to mean `down -v`, destroying four working databases to create a fifth. This runs on every `up` and
+  # 01-databases.sql is written to be idempotent, so a stack that is already set up is left untouched.
+  #
+  # Same image as the server purely so there is nothing extra to pull; only the psql client is used. ON_ERROR_STOP=1
+  # matters: without it psql reports failure only for the last statement, so a broken script exits 0.
+  pg-init:
+    image: postgres:18-alpine
+    container_name: learning-bank-pg-init
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - PGHOST=postgres
+      - PGUSER=postgres
+      - PGPASSWORD=postgres
+    volumes:
+      - ./init:/init:ro
+    entrypoint: ["psql", "-v", "ON_ERROR_STOP=1", "-f", "/init/01-databases.sql"]
+    restart: "no"
+
+  # Single-broker Kafka in KRaft mode - note there is no ZooKeeper container here. Modern Kafka stores cluster metadata
+  # in its own Raft quorum, so this one process is both "broker" (serves data) and "controller" (manages metadata,
+  # elects partition leaders). In production those roles run on separate nodes.
   kafka:
     image: apache/kafka:3.9.1
     container_name: learning-bank-kafka
@@ -43,9 +67,9 @@ services:
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      # These MUST be 1 on a single-broker cluster. They default to 3, and a topic
-      # that can't meet its replication factor simply fails to be created - which
-      # surfaces as confusing consumer-group errors rather than an obvious message.
+      # These MUST be 1 on a single-broker cluster. They default to 3, and a topic that can't meet its replication
+      # factor simply fails to be created - which surfaces as confusing consumer-group errors rather than an obvious
+      # message.
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1

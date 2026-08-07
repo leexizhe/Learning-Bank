@@ -18,15 +18,6 @@
 
     <build>
         <plugins>
-            <!-- StructuredTaskScope (java.util.concurrent) is still a preview API in
-                 JDK 25 (JEP 505, fifth preview): the compiler, Surefire, Failsafe and
-                 spring-boot:run all need the enable-preview flag, or the classes
-                 referencing it won't compile or load.
-
-                 This lives in the module rather than the parent on purpose: preview
-                 class files are pinned to the exact JDK feature release that compiled
-                 them, and the kafka and postgres modules have no reason to carry that
-                 constraint. Worth knowing for an interview. -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>

@@ -37,31 +37,28 @@ import org.springframework.stereotype.Service;
 @Service
 public class BalanceSnapshotService {
 
-  private final PostingRepository postings;
-  private final BalanceSnapshotRepository snapshots;
-  private final BalanceSnapshotTransactionalOps ops;
+    private final PostingRepository postings;
+    private final BalanceSnapshotRepository snapshots;
+    private final BalanceSnapshotTransactionalOps ops;
 
-  public BalanceSnapshotService(
-      PostingRepository postings,
-      BalanceSnapshotRepository snapshots,
-      BalanceSnapshotTransactionalOps ops) {
-    this.postings = postings;
-    this.snapshots = snapshots;
-    this.ops = ops;
-  }
+    public BalanceSnapshotService(
+            PostingRepository postings, BalanceSnapshotRepository snapshots, BalanceSnapshotTransactionalOps ops) {
+        this.postings = postings;
+        this.snapshots = snapshots;
+        this.ops = ops;
+    }
 
-  /**
-   * Identical to {@code LedgerService.balanceOf}, but reads only the postings since the last
-   * checkpoint.
-   */
-  public long balanceOf(long accountId) {
-    Optional<BalanceSnapshot> snapshot = snapshots.findById(accountId);
-    long base = snapshot.map(BalanceSnapshot::getBalanceMinor).orElse(0L);
-    long since = snapshot.map(BalanceSnapshot::getAsOfPostingId).orElse(0L);
-    return base + postings.sumAmountByAccountIdAfterId(accountId, since);
-  }
+    /**
+     * Identical to {@code LedgerService.balanceOf}, but reads only the postings since the last checkpoint.
+     */
+    public long balanceOf(long accountId) {
+        Optional<BalanceSnapshot> snapshot = snapshots.findById(accountId);
+        long base = snapshot.map(BalanceSnapshot::getBalanceMinor).orElse(0L);
+        long since = snapshot.map(BalanceSnapshot::getAsOfPostingId).orElse(0L);
+        return base + postings.sumAmountByAccountIdAfterId(accountId, since);
+    }
 
-  public long takeSnapshot(long accountId) {
-    return ops.takeSnapshot(accountId);
-  }
+    public long takeSnapshot(long accountId) {
+        return ops.takeSnapshot(accountId);
+    }
 }

@@ -11,15 +11,14 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class TransferController {
 
-  private final TransferService transferService;
+    private final TransferService transferService;
 
-  public TransferController(TransferService transferService) {
-    this.transferService = transferService;
-  }
+    public TransferController(TransferService transferService) {
+        this.transferService = transferService;
+    }
 
-  @PostMapping("/api/transfers")
-  public TransferResponse transfer(@Valid @RequestBody TransferRequest request) {
-    return transferService.transfer(
-        request.fromAccountId(), request.toAccountId(), request.amountMinor());
-  }
+    @PostMapping("/api/transfers")
+    public TransferResponse transfer(@Valid @RequestBody TransferRequest request) {
+        return transferService.transfer(request.fromAccountId(), request.toAccountId(), request.amountMinor());
+    }
 }

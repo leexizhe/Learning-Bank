@@ -10,36 +10,35 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class CoordinationController {
 
-  private final RefundService refunds;
-  private final JobRunner jobs;
-  private final PaymentJobRepository jobRepository;
+    private final RefundService refunds;
+    private final JobRunner jobs;
+    private final PaymentJobRepository jobRepository;
 
-  public CoordinationController(
-      RefundService refunds, JobRunner jobs, PaymentJobRepository jobRepository) {
-    this.refunds = refunds;
-    this.jobs = jobs;
-    this.jobRepository = jobRepository;
-  }
+    public CoordinationController(RefundService refunds, JobRunner jobs, PaymentJobRepository jobRepository) {
+        this.refunds = refunds;
+        this.jobs = jobs;
+        this.jobRepository = jobRepository;
+    }
 
-  @PostMapping("/api/refunds/{orderId}")
-  public RefundResponse refund(@PathVariable long orderId) {
-    return new RefundResponse(orderId, refunds.tryRefund(orderId));
-  }
+    @PostMapping("/api/refunds/{orderId}")
+    public RefundResponse refund(@PathVariable long orderId) {
+        return new RefundResponse(orderId, refunds.tryRefund(orderId));
+    }
 
-  @ResponseStatus(HttpStatus.CREATED)
-  @PostMapping("/api/jobs")
-  public PaymentJob seedJob(@RequestBody SeedJobRequest request) {
-    return jobRepository.save(new PaymentJob(request.payload()));
-  }
+    @ResponseStatus(HttpStatus.CREATED)
+    @PostMapping("/api/jobs")
+    public PaymentJob seedJob(@RequestBody SeedJobRequest request) {
+        return jobRepository.save(new PaymentJob(request.payload()));
+    }
 
-  @PostMapping("/api/jobs/claim")
-  public ClaimResponse claim() {
-    return new ClaimResponse(jobs.claimNext().orElse(null));
-  }
+    @PostMapping("/api/jobs/claim")
+    public ClaimResponse claim() {
+        return new ClaimResponse(jobs.claimNext().orElse(null));
+    }
 
-  public record SeedJobRequest(String payload) {}
+    public record SeedJobRequest(String payload) {}
 
-  public record RefundResponse(long orderId, boolean refunded) {}
+    public record RefundResponse(long orderId, boolean refunded) {}
 
-  public record ClaimResponse(Long claimedJobId) {}
+    public record ClaimResponse(Long claimedJobId) {}
 }

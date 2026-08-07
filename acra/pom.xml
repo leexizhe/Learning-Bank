@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.learningbank</groupId>
+        <artifactId>learning-bank</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>acra</artifactId>
+    <name>acra</name>
+    <description>Ingesting ACRA Bizfile business profiles into Postgres: OAuth token caching, reactive re-auth, JSONB snapshots</description>
+
+    <!-- No extra dependencies. RestClient and Jackson come from
+         spring-boot-starter-web, JSONB support from Hibernate 6, and the test
+         double for ACRA is com.sun.net.httpserver.HttpServer out of the JDK -
+         see FakeAcraServer for why that is a real server and not a mock. -->
+</project>
