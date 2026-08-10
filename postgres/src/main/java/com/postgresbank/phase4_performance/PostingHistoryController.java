@@ -48,7 +48,8 @@ public class PostingHistoryController {
      * there is no "jump to page 500". Feeds and statements can live with that; a grid with a page picker cannot, which
      * is why {@code /postings} still exists alongside this.
      *
-     * <p>{@code KeysetPaginationIT} compares the two on <b>buffers read</b> rather than wall-clock time.
+     * <p>{@code Phase5IndexingIT.KeysetPaginationTests} compares the two on <b>buffers read</b> rather than
+     * wall-clock time.
      */
     @GetMapping("/api/accounts/{accountId}/postings/seek")
     public SeekPage seek(

@@ -158,16 +158,27 @@ change, not a redesign.
 | Producer / Consumer | `PaymentInitiationService` / `PaymentConsumer`, `ReconciliationConsumer` |
 | Topic | `common/Topics.java`, created in `config/KafkaTopicConfig.java` |
 | Partitions | `KafkaTopicConfig.PARTITIONS` — 3, with the sizing rationale in the javadoc |
-| **Partition key** | `accountId` as the record key in `PaymentInitiationService` — proved by `OrderingIT` |
+| **Partition key** | `accountId` as the record key in `PaymentInitiationService` — proved by `Phase4OrderingIT` |
 | Offsets & commit timing | `ack-mode: manual_immediate` in `application.yml`; `ack.acknowledge()` is the **last** line of `PaymentConsumer.consume` |
 | Consumer groups | `payment-service` vs `reconciliation-service` — same topic, independent offsets |
-| Idempotent consumer | `ProcessedEvent` + its primary key — proved by `IdempotencyIT` |
-| Transactional outbox | `PaymentOutbox` written inside `process()`'s transaction; `PaymentOutboxRelay` publishes — proved by `OutboxIT` and `OutboxRedeliveryIT` |
+| Idempotent consumer | `ProcessedEvent` + its primary key — proved by `Phase2IdempotencyIT` |
+| Transactional outbox | `PaymentOutbox` written inside `process()`'s transaction; `PaymentOutboxRelay` publishes — proved by `Phase5OutboxIT` |
 | Idempotent **producer** | `enable.idempotence: true` + `acks: all` in `application.yml` |
-| Retries & DLQ | `@RetryableTopic` + `@DltHandler` on `PaymentConsumer` — proved by `DeadLetterIT` |
+| Retries & DLQ | `@RetryableTopic` + `@DltHandler` on `PaymentConsumer` — proved by `Phase3RetriesDltIT` |
 | Replication & failover | 1 replica in dev; see below for why production is different |
 
-## The reliability story
+## Phase 1 — Topics, partitions & keys (`phase1_topics_partitions/`)
+
+The ground floor: a record is appended to a **topic**, which is split into **partitions**, and the record's **key**
+decides which one it lands on. `hash(key) % partitionCount` is the whole mechanism — there is nothing else enforcing
+per-account ordering later on, which is why this phase comes first.
+
+`Phase1TopicsPartitionsIT` drives the full happy path end to end (HTTP → `payment-events` → debit → `payment-results` →
+reconciliation CONFIRMED) without calling a single service method directly, then asserts that three payments for one
+`accountId` all resolve to the same partition. Note the API answers **202, not 201**: at that instant nothing has been
+debited, and all that has happened is a durable append to a topic.
+
+## Phase 2 — Offsets & the idempotent consumer (`phase2_idempotency/`)
 
 **Commit the offset last, never first.** With Spring's default ack mode, offsets are committed on a schedule after the
 listener returns. Crash between reading a record and finishing the ledger write, and Kafka already believes that payment
@@ -186,6 +197,8 @@ Note this is a *different* problem from `enable.idempotence: true` on the produc
 setting stops a *producer* retry from writing the same record twice. It says nothing about a *consumer* reading a record
 twice. You need both, and they solve different halves.
 
+## Phase 3 — Retries & the dead-letter topic (`phase3_retries_dlt/`)
+
 **Rejected is not failed.** Insufficient funds is a correct, final business answer: it gets a REJECTED result event,
 commits its offset, and never retries — retrying would just decline it again forever. An unknown account is genuinely
 unprocessable, so it dead-letters. Getting this distinction wrong is how you end up with a DLT full of perfectly
@@ -199,7 +212,41 @@ a separate retry topic and moves on immediately; the waiting happens over there.
 **Never drop a dead letter.** A dead-lettered record is a payment a customer believes they made. It keeps the original
 topic, offset, and exception as headers, so it can be triaged and replayed once the bug is fixed.
 
-## The dual-write problem, and the transactional outbox
+## Phase 4 — Ordering, and my own retry topic breaking it (`phase4_ordering/`)
+
+`Phase4OrderingIT.InProducedOrderTests` establishes the guarantee: two events sharing an `accountId` share a partition,
+so one consumer thread applies them in offset order. The amounts are chosen so the order changes the answer — the
+account holds exactly enough for the first payment and not the second, because balances are additive and "debit 10 then
+debit 20" would end at the same number either way.
+
+Then the second block withdraws it, and noticing the tension is worth more than a design with no tension in it.
+
+This module promises per-account ordering *and* non-blocking retries via `@RetryableTopic` (phase 3). But when event #2
+for an account fails, Spring republishes it to `payment-events-retry-300` and moves on — so #3 and #4 keep flowing on
+the main topic and are applied **first**. Per-account ordering is gone precisely in the failure case where it mattered.
+`UnderRetryTests` proves it: three payments, the second fails transiently, and the third takes the money the second was
+queued for.
+
+**There is no free fix — you pick:**
+
+- **Accept it**, and make the downstream commutative or idempotent. Fine for a debit keyed on an event id; not fine for
+  a state machine where "cancelled then shipped" and "shipped then cancelled" differ.
+- **Block and retry in place**, accepting head-of-line blocking, within a `max.poll.interval.ms` budget — the thing
+  `@RetryableTopic` exists to avoid, so this is a deliberate trade back.
+- **`Consumer.pause()` the partition** and retry with backoff. Keeps order at the cost of throughput *for that partition
+  only*, which is the middle ground.
+
+Two details the test surfaced that are worth carrying:
+
+- **"Non-blocking" retries still block briefly.** When the listener throws, Spring publishes the record to the retry
+  topic *on the consumer thread* — about 450ms here. The first version of the test failed because the retried event beat
+  the following one by 9ms; the two were the same order of magnitude. It now fails twice so the retry lands on the 600ms
+  tier and the margin is a full second.
+- **Assert on a terminal state, never on ordering you observed.** Balances are additive, so the final number is
+  identical either way. Funding the account for exactly one of two equal payments makes "which one was ACCEPTED" a
+  terminal fact that only one ordering can produce.
+
+## Phase 5 — The dual-write problem, and the transactional outbox (`phase5_outbox/`)
 
 **This started as a bug in this repo, and the bug is the better story.** `PaymentConsumer` used to commit the database
 transaction and then hand the result to `kafkaTemplate.send(...)` — which is **asynchronous**. It returns a future the
@@ -260,39 +307,10 @@ and a `published` flag. Fewer moving parts, one less insert per payment. Two tab
 (idempotency and delivery are different jobs with different retention needs) and on symmetry with the postgres module's
 own `outbox`. It's a real trade, not an obvious call.
 
-## My own retry topic breaks my own ordering guarantee
+## Phase 6 — Rebalancing (`phase6_rebalancing/`)
 
-Two claims above are in **direct tension**, and noticing it is worth more than a design with no tension in it.
-
-This module promises per-account ordering (events keyed by `accountId`, proved by `OrderingIT`) *and* non-blocking
-retries via `@RetryableTopic`. But when event #2 for an account fails, Spring republishes it to
-`payment-events-retry-300` and moves on — so #3 and #4 keep flowing on the main topic and are applied **first**.
-Per-account ordering is gone precisely in the failure case where it mattered. `OrderingUnderRetryIT` proves it: three
-payments, the second fails transiently, and the third takes the money the second was queued for.
-
-**There is no free fix — you pick:**
-
-- **Accept it**, and make the downstream commutative or idempotent. Fine for a debit keyed on an event id; not fine for
-  a state machine where "cancelled then shipped" and "shipped then cancelled" differ.
-- **Block and retry in place**, accepting head-of-line blocking, within a `max.poll.interval.ms` budget — the thing
-  `@RetryableTopic` exists to avoid, so this is a deliberate trade back.
-- **`Consumer.pause()` the partition** and retry with backoff. Keeps order at the cost of throughput *for that partition
-  only*, which is the middle ground.
-
-Two details the test surfaced that are worth carrying:
-
-- **"Non-blocking" retries still block briefly.** When the listener throws, Spring publishes the record to the retry
-  topic *on the consumer thread* — about 450ms here. The first version of the test failed because the retried event beat
-  the following one by 9ms; the two were the same order of magnitude. It now fails twice so the retry lands on the 600ms
-  tier and the margin is a full second.
-- **Assert on a terminal state, never on ordering you observed.** Balances are additive, so the final number is
-  identical either way. Funding the account for exactly one of two equal payments makes "which one was ACCEPTED" a
-  terminal fact that only one ordering can produce.
-
-## Rebalancing
-
-`RebalanceIT` stops the listener container, raises its concurrency and restarts it — a genuine leave-and-rejoin, not a
-simulation — while events are in flight, and asserts every account is debited exactly once. **What saves you is
+`Phase6RebalancingIT` stops the listener container, raises its concurrency and restarts it — a genuine leave-and-rejoin,
+not a simulation — while events are in flight, and asserts every account is debited exactly once. **What saves you is
 `processed_events`**, because a rebalance can absolutely redeliver a record whose offset had not yet been committed.
 Rebalancing is not an exactly-once mechanism; idempotency is what makes it survivable.
 
@@ -349,24 +367,26 @@ module is pinned to `apache/kafka:3.9.1`, so that stays a talking point rather t
 Every test asserts on an **observable outcome** — an HTTP response, a row in Postgres, or a record actually consumed off
 a topic. None of them mock anything.
 
+One IT per phase, with a `@Nested` block per scenario — the same layout as the concurrency and postgres modules. The
+blocks are where the pairings live: phase 3 asserts a record is *absent* from the DLT and then that one is *present*,
+and phase 4 establishes the ordering guarantee and then breaks it. A single block can be run on its own with
+``-Dit.test='Phase5OutboxIT$CrashWindowRecoveryTests'``.
+
 | Test | Proves |
 |---|---|
-| `PaymentFlowIT` | The full path: HTTP → topic → debit → result topic → CONFIRMED. Plus that one `accountId` always resolves to one partition |
-| `IdempotencyIT` | The same `eventId` delivered twice debits once — and *stays* once. Distinct ids both apply |
-| `OrderingIT` | Two events for one account apply in produced order, using amounts where the order changes the final balance |
-| `InsufficientFundsIT` | A decline is a business answer: REJECTED result, ROLLBACK reconciliation, balance untouched, **nothing dead-lettered** |
-| `DeadLetterIT` | An unprocessable event reaches the DLT carrying its original topic and failure reason as headers |
-| `OutboxIT` | The result row is written in the *same* transaction as the debit: a successful payment leaves exactly one row, a failed one leaves none. And the relay drains what it finds |
-| `OutboxRedeliveryIT` | A result lost before its send lands is recovered from the outbox, and the redelivery that follows does not debit twice. Counts records rather than waiting for one — the result must appear **twice**, which no timing can fake |
-| `OrderingUnderRetryIT` | That this module's own retry topic breaks its own per-account ordering guarantee — a limitation, proved rather than hidden |
-| `RebalanceIT` | No record is lost or double-applied across a real leave-and-rejoin rebalance; the idempotency table is what saves you |
+| `Phase1TopicsPartitionsIT` | The full path: HTTP → topic → debit → result topic → CONFIRMED. Plus that one `accountId` always resolves to one partition |
+| `Phase2IdempotencyIT` | The same `eventId` delivered twice debits once — and *stays* once. Distinct ids both apply |
+| `Phase3RetriesDltIT` | `RejectedNotFailedTests`: a decline is a business answer — REJECTED result, ROLLBACK reconciliation, balance untouched, **nothing dead-lettered**. `DeadLetterTests`: an unprocessable event reaches the DLT carrying its original topic and failure reason as headers |
+| `Phase4OrderingIT` | `InProducedOrderTests`: two events for one account apply in produced order, using amounts where the order changes the final balance. `UnderRetryTests`: this module's own retry topic breaks that guarantee — a limitation, proved rather than hidden |
+| `Phase5OutboxIT` | `AtomicityTests`: the result row is written in the *same* transaction as the debit, so a successful payment leaves exactly one row and a failed one leaves none. `RelayTests`: the relay drains what it finds. `CrashWindowRecoveryTests`: a result lost before its send lands is recovered, and the redelivery that follows does not debit twice — counted rather than waited for, so the result must appear **twice**, which no timing can fake |
+| `Phase6RebalancingIT` | No record is lost or double-applied across a real leave-and-rejoin rebalance; the idempotency table is what saves you |
 
 ```bash
 ./mvnw -pl kafka verify
 ```
 
 ```bash
-./mvnw -pl kafka verify -Dit.test=IdempotencyIT
+./mvnw -pl kafka verify -Dit.test=Phase2IdempotencyIT
 ```
 
 ## Project layout
@@ -378,16 +398,26 @@ src/main/java/com/kafkabank/
   order/           OrderController + PaymentInitiationService  (produces payment-events)
   payment/         PaymentConsumer + PaymentProcessingService  (consumes it, owns balances)
                    PaymentOutboxRelay + ...RelayOps  (the outbox's two relays)
-                   SimulatedTransientFailure  (fault injection for OrderingUnderRetryIT)
+                   SimulatedTransientFailure  (fault injection for phase 4's retry block)
   reconciliation/  ReconciliationConsumer + ReconciliationService (consumes BOTH topics)
 src/main/resources/
   application.yml  every Kafka setting, commented with why it's set that way
   schema.sql
 src/test/java/com/kafkabank/
-  TestContainerConfig.java  singleton Kafka (KRaft) + Postgres
-  BaseKafkaIT.java          shared HTTP + topic-draining helpers
-  *IT.java                  the nine scenarios above
+  TestContainerConfig.java             singleton Kafka (KRaft) + Postgres
+  BaseKafkaIT.java                     shared HTTP + topic-draining helpers
+  phase1_topics_partitions/Phase1TopicsPartitionsIT.java   happy path + partition key
+  phase2_idempotency/Phase2IdempotencyIT.java              at-least-once, applied once
+  phase3_retries_dlt/Phase3RetriesDltIT.java               @Nested: RejectedNotFailed, DeadLetter
+  phase4_ordering/Phase4OrderingIT.java                    @Nested: InProducedOrder, UnderRetry
+  phase5_outbox/Phase5OutboxIT.java                        @Nested: Atomicity, Relay, CrashWindowRecovery
+  phase6_rebalancing/Phase6RebalancingIT.java              leave-and-rejoin, nothing lost
 ```
+
+**Main sources stay split by role, not by phase.** `order/`, `payment/` and `reconciliation/` have no imports between
+them at all, which is what makes "these are three services in production" true rather than aspirational; every phase
+above cuts across exactly one of them, so folding main into phase packages would create the first cross-role
+dependencies and buy nothing. The phases are how the *tests* are read, and reading is what they are for.
 
 Docker Engine 29+ needs `api.version=1.44` in `src/test/resources/docker-java.properties` (already there) or
 Testcontainers gets misleading empty 400s from the daemon.
@@ -398,18 +428,18 @@ Testcontainers gets misleading empty 400s from the daemon.
 
 | Question | Where |
 |---|---|
-| How do you guarantee a payment is processed exactly once? | the reliability story; `IdempotencyIT` |
+| How do you guarantee a payment is processed exactly once? | the reliability story; `Phase2IdempotencyIT` |
 | Where exactly do you commit the offset, and why there? | `ack-mode: manual_immediate`; `PaymentConsumer` |
 | Consumer idempotence vs producer idempotence — different things? | the reliability story |
-| Your DB commit and your Kafka publish aren't atomic. What now? | the outbox section; `OutboxIT` |
-| The process dies between the commit and the publish. | `OutboxRedeliveryIT` |
-| How do you keep events for one account in order? | partition key; `OrderingIT` |
-| ...and what breaks that guarantee? | `OrderingUnderRetryIT` |
+| Your DB commit and your Kafka publish aren't atomic. What now? | the outbox section; `Phase5OutboxIT` |
+| The process dies between the commit and the publish. | `Phase5OutboxIT.CrashWindowRecoveryTests` |
+| How do you keep events for one account in order? | partition key; `Phase4OrderingIT` |
+| ...and what breaks that guarantee? | `Phase4OrderingIT.UnderRetryTests` |
 | One account is 50% of your traffic. | trade-offs; hot-partition discussion |
-| What happens during a rebalance? Name the three timeouts. | the rebalancing section; `RebalanceIT` |
+| What happens during a rebalance? Name the three timeouts. | the rebalancing section; `Phase6RebalancingIT` |
 | Eager vs cooperative rebalancing, and how do you migrate? | the rebalancing section |
-| Retry without blocking the partition. | `@RetryableTopic`; `DeadLetterIT` |
-| A business decline isn't a failure — how do you model that? | "rejected is not failed"; `InsufficientFundsIT` |
+| Retry without blocking the partition. | `@RetryableTopic`; `Phase3RetriesDltIT.DeadLetterTests` |
+| A business decline isn't a failure — how do you model that? | "rejected is not failed"; `Phase3RetriesDltIT.RejectedNotFailedTests` |
 | `acks=all` — is that enough for durability? | `KafkaTopicConfig`, `min.insync.replicas` |
 | Why is `max.in.flight=5` safe here? | `application.yml` producer block |
 | How many partitions, and can you change it later? | `KafkaTopicConfig` javadoc |

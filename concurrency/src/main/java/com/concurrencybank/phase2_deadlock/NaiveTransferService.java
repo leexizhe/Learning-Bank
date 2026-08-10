@@ -20,8 +20,9 @@ package com.concurrencybank.phase2_deadlock;
  *       data. That's what makes this class of bug so hard to spot in review: no single method looks wrong.
  * </ul>
  *
- * <p><b>Not for production use</b> — this deadlocks on purpose, and {@code NaiveTransferServiceDeadlockTest} asserts
- * that it does, using the JVM's own deadlock detector as the witness.
+ * <p><b>Not for production use</b> — this deadlocks on purpose, and
+ * {@code Phase2DeadlockTest.NaiveTransferServiceTests} asserts that it does, using the JVM's own deadlock detector as
+ * the witness.
  */
 public class NaiveTransferService {
 

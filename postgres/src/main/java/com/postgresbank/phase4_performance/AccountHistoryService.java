@@ -12,8 +12,8 @@ import org.springframework.transaction.annotation.Transactional;
  * #loadNPlusOne} is the mistake: one query for the accounts, then Hibernate silently issues one more query <em>per
  * account</em> the moment {@code getPostings()} is touched, because the association is LAZY (see {@link Account}).
  * {@link #loadFetchJoined} is the fix - a single query with {@code JOIN FETCH} pulls accounts and their postings
- * together. NPlusOneIT proves the query counts directly via Hibernate's {@code Statistics}, rather than just trusting
- * that JOIN FETCH "should" be faster.
+ * together. {@code Phase4PerformanceIT.NPlusOneTests} proves the query counts directly via Hibernate's
+ * {@code Statistics}, rather than just trusting that JOIN FETCH "should" be faster.
  */
 @Service
 @RequiredArgsConstructor

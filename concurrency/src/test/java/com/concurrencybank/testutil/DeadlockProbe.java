@@ -14,10 +14,11 @@ import java.util.stream.Collectors;
  *
  * <p><b>Why every method takes the thread ids you care about.</b> {@link ThreadMXBean#findDeadlockedThreads()} is
  * <b>JVM-global</b>: it reports every deadlocked thread in the process, not just yours. Surefire runs all of this
- * module's test classes in a single fork, and {@code NaiveTransferServiceDeadlockTest} deliberately leaves two threads
- * deadlocked forever. A bare {@code assertThat(findDeadlockedThreads()).isNull()} anywhere else would therefore pass or
- * fail depending on class execution order. Scoping every assertion to the calling test's own thread ids is what makes
- * both directions of the claim order-independent.
+ * module's test classes in a single fork, and {@code Phase2DeadlockTest.NaiveTransferServiceTests} deliberately leaves
+ * two threads deadlocked forever. A bare {@code assertThat(findDeadlockedThreads()).isNull()} anywhere else would
+ * therefore pass or fail depending on class execution order — including in the sibling block of that very same class.
+ * Scoping every assertion to the calling test's own thread ids is what makes both directions of the claim
+ * order-independent.
  *
  * <p>{@code findDeadlockedThreads()} rather than {@code findMonitorDeadlockedThreads()}: the latter only sees cycles
  * built from {@code synchronized} monitors, and {@code LockedAccount} guards itself with a {@link

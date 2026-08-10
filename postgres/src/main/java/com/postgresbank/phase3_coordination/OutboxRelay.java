@@ -13,7 +13,8 @@ import org.springframework.stereotype.Component;
  * test suite is structurally unable to catch.
  *
  * <p>{@link OutboxRelayTransactionalOps#relayOnce()} is called both by the scheduled trigger here and directly by
- * {@code OutboxIT}; tests don't wait out a real scheduling interval, they invoke the same method the scheduler would.
+ * {@code Phase3CoordinationIT.OutboxTests}; tests don't wait out a real scheduling interval, they invoke the same
+ * method the scheduler would.
  */
 @Component
 @RequiredArgsConstructor

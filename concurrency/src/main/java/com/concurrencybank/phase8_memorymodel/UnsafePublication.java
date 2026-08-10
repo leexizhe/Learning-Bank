@@ -15,8 +15,8 @@ package com.concurrencybank.phase8_memorymodel;
  * <p><b>The honest part, and the actual lesson.</b> Its sibling {@link FinalFieldFreeze} is safe from this, and the
  * test can assert that absolutely. This class is <em>permitted</em> to break, but on x86 — whose TSO memory model
  * forbids store-store reordering in hardware — HotSpot will usually not produce the anomaly at all. So {@code
- * UnsafePublicationTest} reports how often it saw it and asserts only that the harness ran, while the final-field
- * version asserts the guarantee outright.
+ * Phase8MemoryModelTest.UnsafePublicationTests} reports how often it saw it and asserts only that the harness ran,
+ * while the final-field version asserts the guarantee outright.
  *
  * <p>That asymmetry is the point worth taking into an interview: <b>you cannot test your way to memory-model
  * correctness.</b> A green suite proves your hardware declined to demonstrate the bug today, not that the bug isn't

@@ -39,10 +39,12 @@ curl -X POST localhost:8081/api/gateway/validate?transactionId=TX-1
 
 **The problem:** `balance += amount` looks like one operation but is really three — read, add, write. If two threads
 interleave those steps, one thread's update can be silently lost. `UnsafeCounter` is deliberately broken to demonstrate
-this; `UnsafeCounterTest` proves it by hammering it with 50 threads and showing the final total is *less* than the
-arithmetic sum.
+this; `Phase1ThreadSafetyTest` proves it by hammering it with 50 threads and showing the final total is *less* than the
+arithmetic sum. That one test class holds the whole phase — the broken counter and both fixes run the identical stress
+shape from shared constants, so the only thing that differs between them is the final assertion.
 
 **Two different fixes, same problem:**
+
 - `SynchronizedAccount` — every method is `synchronized`, which is shorthand for acquiring `this`'s intrinsic monitor
   lock. Two threads calling any synchronized method *on the same instance* can never interleave. It's an
   **object-level** lock — a *static* synchronized method would instead lock the `Class` object, which is a different,
@@ -85,15 +87,16 @@ fight over the same first lock), just never a deadlock.
 unavailable" after a bounded wait beats hanging the caller indefinitely. Locks are released in a `finally` block,
 always, even on the exception path.
 
-`LockOrderedTransferServiceTest` runs the exact deadlock-trap shape (thread A doing A→B, thread B doing B→A,
-concurrently, thousands of times) wrapped in `assertTimeoutPreemptively` — if the ordering guarantee ever regresses, the
-test fails loudly instead of hanging the build.
+`Phase2DeadlockTest.LockOrderedTransferServiceTests` runs the exact deadlock-trap shape (thread A doing A→B, thread B
+doing B→A, concurrently, thousands of times) wrapped in `assertTimeoutPreemptively` — if the ordering guarantee ever
+regresses, the test fails loudly instead of hanging the build.
 
 **Proving the trap is real, not just that the fix is fast.** A timeout is weak evidence: it can't tell "no deadlock"
 from "a slow machine", and it can't tell a genuine fix from a lucky interleaving. So `NaiveTransferService` keeps the
 *broken* version — locks in caller order, with a blocking `lock()` and no timeout — and
-`NaiveTransferServiceDeadlockTest` asserts it genuinely deadlocks, with **`ThreadMXBean.findDeadlockedThreads()`** as
-the witness. That's the JVM's own lock-graph analysis naming both threads as a cycle, not an inference from elapsed
+`Phase2DeadlockTest.NaiveTransferServiceTests` asserts it genuinely deadlocks, with
+**`ThreadMXBean.findDeadlockedThreads()`** as the witness. That's the JVM's own lock-graph analysis naming both threads
+as a cycle, not an inference from elapsed
 time. The two threads rendezvous on a `CyclicBarrier` between taking their first lock and asking for their second, so
 the circular wait is *deterministic* rather than a race the test hopes wins.
 
@@ -103,8 +106,9 @@ Two details that make it safe to keep in a build:
   the build permanently — which is precisely the production failure being demonstrated, and a terrible property for a
   test.
 - `findDeadlockedThreads()` is **JVM-global**, and Surefire runs every test class in one fork. So
-  `LockOrderedTransferServiceTest`'s mirror assertion — polled *while* its two threads contend, asserting the JVM never
-  sees a cycle between them — is scoped to its own thread ids. An unscoped `isEmpty()` would pass or fail depending on
+  `Phase2DeadlockTest.LockOrderedTransferServiceTests`' mirror assertion — polled *while* its two threads contend,
+  asserting the JVM never sees a cycle between them — is scoped to its own thread ids. An unscoped `isEmpty()` would
+  pass or fail depending on
   class ordering. (Verify with `-Dsurefire.runOrder=reversealphabetical`, which puts the naive demo first.)
 
 Use `findDeadlockedThreads()`, not `findMonitorDeadlockedThreads()`: the latter only sees cycles built from
@@ -123,6 +127,7 @@ underneath it. **Interview differentiator:** never wrap virtual threads in a fix
 the scarcity you were trying to escape.
 
 **But "unlimited threads" isn't "unlimited concurrency".** The old fixed pool was quietly doing two jobs at once:
+
 1. Stop your own app from creating too many expensive platform threads.
 2. Stop you from overloading something downstream (a database, a rate-limited API).
 
@@ -140,7 +145,7 @@ even with thousands of callers queued behind it.
 `scope.join()` doesn't return until all three finish, and if any one throws, the `Joiner` (`allSuccessfulOrThrow()`
 here) cancels the others immediately, genuinely interrupting whatever they're blocked on. No orphaned virtual thread
 keeps running after the method returns — that's the resource-leak problem structured concurrency exists to prevent.
-`PaymentGatewayServiceTest` proves both properties without touching the internals: wall-clock time for three successful
+`Phase3VirtualThreadsTest` proves both properties without touching the internals: wall-clock time for three successful
 checks is close to the *slowest* one, not the sum (fan-out), and when one check fails fast, the other two — even
 configured for 2 seconds — don't hold up the response (cancellation). Still a *preview* API in JDK 25 (JEP 505), which
 is the whole reason the other two variants exist.
@@ -167,19 +172,19 @@ three futures racing to cancel each other, which exception `allOf()` itself repo
 inspects each future directly afterward for the one that failed on its own merits rather than as a side effect of being
 cancelled.)
 
-| | `StructuredTaskScope` | `ExecutorService` | `CompletableFuture` |
-|---|---|---|---|
-| Cancel siblings on failure | automatic | manual (`future.cancel(true)`) | manual (`whenComplete` + `cancel(true)`) |
-| Does cancel actually interrupt? | yes | yes | **no** — futures report done, task keeps running |
-| Clean up on exit | automatic (try-with-resources) | manual `shutdown()` via `@PreDestroy` | manual `shutdown()` via `@PreDestroy` |
-| How many threads? | not a question — cheap, one per task | a number you pick and tune | a number you pick and tune |
-| Composability (chaining, combining unrelated sources) | low — built for one fork/join unit | low | high |
+|                                                       | `StructuredTaskScope`                | `ExecutorService`                     | `CompletableFuture`                              |
+|-------------------------------------------------------|--------------------------------------|---------------------------------------|--------------------------------------------------|
+| Cancel siblings on failure                            | automatic                            | manual (`future.cancel(true)`)        | manual (`whenComplete` + `cancel(true)`)         |
+| Does cancel actually interrupt?                       | yes                                  | yes                                   | **no** — futures report done, task keeps running |
+| Clean up on exit                                      | automatic (try-with-resources)       | manual `shutdown()` via `@PreDestroy` | manual `shutdown()` via `@PreDestroy`            |
+| How many threads?                                     | not a question — cheap, one per task | a number you pick and tune            | a number you pick and tune                       |
+| Composability (chaining, combining unrelated sources) | low — built for one fork/join unit   | low                                   | high                                             |
 
 `GatewayController` exposes all three — `POST /api/gateway/validate` (StructuredTaskScope), `POST
 /api/gateway/validate-legacy` (ExecutorService), and `POST /api/gateway/validate-completable-future` (CompletableFuture)
-— with `PaymentGatewayServiceTest`, `PaymentGatewayServiceExecutorTest`, and
-`PaymentGatewayServiceCompletableFutureTest` running the same three named scenarios against each, so any one of the
-three files stands alone in an interview and the diffs between files show exactly what changes.
+— with `Phase3VirtualThreadsTest`'s three nested blocks (`StructuredTaskScopeTests`, `ExecutorServiceTests`,
+`CompletableFutureTests`) running the same three named scenarios against each, so any one of them stands alone in an
+interview and the diffs between adjacent blocks show exactly what changes.
 
 ### When to reach for which — rule of thumb
 
@@ -221,11 +226,11 @@ an interview: pessimistic locking trades throughput for certainty and is the rig
 row is expected (like two transfers hitting the same account); optimistic locking is cheaper when conflicts are rare and
 you'd rather retry than block.
 
-`TransferControllerIT` is the integration test: it spins up a real Postgres via Testcontainers, creates two accounts
-over HTTP, then fires 100 concurrent `alice→bob` transfers interleaved with 100 concurrent `bob→alice` transfers — the
-exact deadlock-trap shape from Phase 2, now exercised through the full Spring MVC + JPA stack instead of a unit test. If
-the lock ordering were wrong, this would either hang or leave the books unbalanced; instead it asserts both accounts end
-up exactly back at their starting balance.
+`Phase4LedgerIT.TransferControllerTests` is the integration test: it spins up a real Postgres via Testcontainers,
+creates two accounts over HTTP, then fires 100 concurrent `alice→bob` transfers interleaved with 100 concurrent
+`bob→alice` transfers — the exact deadlock-trap shape from Phase 2, now exercised through the full Spring MVC + JPA
+stack instead of a unit test. If the lock ordering were wrong, this would either hang or leave the books unbalanced;
+instead it asserts both accounts end up exactly back at their starting balance.
 
 ## Phase 5 — Locking gotchas (`phase5_locking_gotchas/`)
 
@@ -379,10 +384,11 @@ follow-up: `volatile` buys visibility, never atomicity, which is why it fixes a 
 `volatile` for flags, never for counters.**
 
 **The methodological point, which is the actual interview material.** These tests are deliberately asymmetric.
-`FinalFieldFreezeTest` *asserts* the anomaly never happens, because the JMM guarantees it. `UnsafePublicationTest` only
-*reports* how often it saw one, because the JMM merely **permits** it — and on x86, whose TSO model forbids store-store
-reordering in hardware, HotSpot usually declines to demonstrate it. On this machine it reports 35,000 reads and zero
-sightings. A test asserting the bug appears would fail precisely on the platforms where the code is safest.
+`Phase8MemoryModelTest.FinalFieldFreezeTests` *asserts* the anomaly never happens, because the JMM guarantees it. Its
+sibling `UnsafePublicationTests` only *reports* how often it saw one, because the JMM merely **permits** it — and on
+x86, whose TSO model forbids store-store reordering in hardware, HotSpot usually declines to demonstrate it. On this
+machine it reports 35,000 reads and zero sightings. A test asserting the bug appears would fail precisely on the
+platforms where the code is safest.
 
 So: **you cannot test your way to memory-model correctness.** A green suite proves your hardware declined to show you
 the bug today, not that the bug isn't there — and the same class on an ARM server, where store-store reordering is
@@ -409,17 +415,24 @@ src/main/java/com/concurrencybank/
 src/test/java/com/concurrencybank/
   testutil/ConcurrencyHarness.java   shared "fire N threads at once" helper for stress tests
   testutil/DeadlockProbe.java        ThreadMXBean deadlock assertions, scoped to a test's own threads
-  phase1-3,5-8 *Test.java             fast unit tests, no Docker
-  phase4_ledger/*IT.java              Testcontainers integration tests (mvnw verify)
+  phase<N>/Phase<N><Name>Test.java   one test class per phase, one @Nested block per topic - fast units, no Docker
+  phase4_ledger/TestContainerConfig.java  singleton Postgres, in the only phase that needs one
+  phase4_ledger/BaseControllerIT.java     @SpringBootTest + TestRestTemplate, package-private beside its one subclass
+  phase4_ledger/Phase4LedgerIT.java       Testcontainers integration tests (mvnw verify)
 ```
+
+One test class per phase, rather than one per production class: these tests are read far more often than they are run,
+and most of a phase is the same test twice with one thing changed. Keeping a phase in one file is what lets you see the
+difference instead of holding two files in your head. The `@Nested` blocks keep each topic grouped in the IDE test tree
+and still allow targeting a single one with ``-Dtest='Phase3VirtualThreadsTest$ExecutorServiceTests'``.
 
 ## Commands
 
 ```powershell
 .\mvnw.cmd -pl concurrency test      # Surefire: *Test (phases 1-3, 5-6, pure logic + concurrency stress, no Docker)
 .\mvnw.cmd -pl concurrency verify     # + Failsafe: *IT (phase 4, full app against Testcontainers Postgres)
-.\mvnw.cmd -pl concurrency test -Dtest=LockOrderedTransferServiceTest   # single unit test
-.\mvnw.cmd -pl concurrency verify -Dit.test=TransferControllerIT -Dtest=skip   # single IT
+.\mvnw.cmd -pl concurrency test -Dtest=Phase2DeadlockTest   # single phase
+.\mvnw.cmd -pl concurrency verify -Dit.test=Phase4LedgerIT -Dtest=skip   # single IT
 ```
 
 Docker Engine 29+ needs `api.version=1.44` in `src/test/resources/docker-java.properties` (already there) or
@@ -431,22 +444,22 @@ Testcontainers gets misleading empty 400s from the daemon.
 
 Skim this if you have 90 seconds. Each phase exists because of a question.
 
-| Question | Where |
-|---|---|
-| Why isn't `count++` atomic, and does `volatile` fix it? | phase 1, phase 8 |
-| Implement a thread-safe account with `withdraw`. Now without locks. | phase 1 (`AtomicAccount`) |
-| When does CAS succeed and still give you the wrong answer? | phase 1 (`AbaProblemDemo`) |
-| `AtomicLong` or `LongAdder` for this counter? | phase 6 (`CounterContention`) |
-| Two threads transfer between the same two accounts, opposite directions. | phase 2 |
-| Prove it actually deadlocks. | phase 2 (`NaiveTransferServiceDeadlockTest`) |
-| 10,000 concurrent requests, three downstream calls each. | phase 3 |
-| Virtual threads: when do they help, and when do they change nothing? | phase 3 |
-| Three ways to fan out — which cancels correctly? | phase 3 |
-| Why is `synchronized("someString")` a bug? | phase 5 |
-| Double-checked locking: why is `volatile` load-bearing? | phase 5 |
-| Write a rate limiter. Token bucket or sliding window? | phase 7 |
-| Write a thread-safe LRU cache. Now make it concurrent. | phase 7 |
-| Bounded blocking queue with `wait`/`notify`. Now with `Condition`s. | phase 6 → phase 7 |
-| Write a connection pool with borrow timeout. | phase 7 (`BorrowablePool`) |
-| Why is a `final` field visible without synchronization when a plain one isn't? | phase 8 |
-| Why might a loop never see another thread's write? | phase 8 (`StopFlagVisibility`) |
+| Question                                                                       | Where                                                    |
+|--------------------------------------------------------------------------------|----------------------------------------------------------|
+| Why isn't `count++` atomic, and does `volatile` fix it?                        | phase 1, phase 8                                         |
+| Implement a thread-safe account with `withdraw`. Now without locks.            | phase 1 (`AtomicAccount`)                                |
+| When does CAS succeed and still give you the wrong answer?                     | phase 1 (`AbaProblemDemo`)                               |
+| `AtomicLong` or `LongAdder` for this counter?                                  | phase 6 (`CounterContention`)                            |
+| Two threads transfer between the same two accounts, opposite directions.       | phase 2                                                  |
+| Prove it actually deadlocks.                                                   | phase 2 (`Phase2DeadlockTest.NaiveTransferServiceTests`) |
+| 10,000 concurrent requests, three downstream calls each.                       | phase 3                                                  |
+| Virtual threads: when do they help, and when do they change nothing?           | phase 3                                                  |
+| Three ways to fan out — which cancels correctly?                               | phase 3                                                  |
+| Why is `synchronized("someString")` a bug?                                     | phase 5                                                  |
+| Double-checked locking: why is `volatile` load-bearing?                        | phase 5                                                  |
+| Write a rate limiter. Token bucket or sliding window?                          | phase 7                                                  |
+| Write a thread-safe LRU cache. Now make it concurrent.                         | phase 7                                                  |
+| Bounded blocking queue with `wait`/`notify`. Now with `Condition`s.            | phase 6 → phase 7                                        |
+| Write a connection pool with borrow timeout.                                   | phase 7 (`BorrowablePool`)                               |
+| Why is a `final` field visible without synchronization when a plain one isn't? | phase 8                                                  |
+| Why might a loop never see another thread's write?                             | phase 8 (`StopFlagVisibility`)                           |

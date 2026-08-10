@@ -43,7 +43,7 @@ response`.
   The naive two-state design deadlocks the client into either double-submitting or giving up.
 
 **The guarantee is the unique constraint, not the check.** Two concurrent requests can both pass a "have I seen this
-key?" read; only one can commit the insert. → `postgres/phase2_ledger`, proved by `IdempotencyIT`.
+key?" read; only one can commit the insert. → `postgres/phase2_ledger`, proved by `Phase2LedgerIT.IdempotencyTests`.
 
 ---
 
@@ -59,12 +59,12 @@ cannot ship that. `NUMERIC` when you need fractional minor units or FX rates.
 
 **Enforced in the database, not just by convention.** A deferred constraint trigger asserts every transfer's postings
 sum to zero, checked at COMMIT rather than at INSERT — because halfway through writing a transfer the ledger is
-legitimately unbalanced. → `postgres/phase6_operations`, proved by `DeferredBalanceConstraintIT`.
+legitimately unbalanced. → `postgres/phase6_operations`, proved by `Phase6OperationsIT.DeferredBalanceConstraintTests`.
 
 **Reads stay fast via snapshots.** `SUM(postings)` is O(rows for that account), which is fine at a hundred and unusable
 at ten million. A periodic job records "as of posting N the balance was X" and reads become snapshot + delta. The
 journal stays the source of truth, so the snapshot can always be recomputed and audited — **a bad snapshot is a
-performance bug, not a correctness one.** → `postgres/phase6_operations`, proved by `SnapshotIT`.
+performance bug, not a correctness one.** → `postgres/phase6_operations`, proved by `Phase6OperationsIT.SnapshotTests`.
 
 ---
 
@@ -72,8 +72,8 @@ performance bug, not a correctness one.** → `postgres/phase6_operations`, prov
 
 **Two transfers touching the same two accounts in opposite directions** is the classic deadlock. Fix by always locking
 in a deterministic order — ascending account id — which makes circular wait structurally impossible. →
-`concurrency/phase2_deadlock`, and `NaiveTransferServiceDeadlockTest` proves the unordered version genuinely deadlocks
-using the JVM's own detector.
+`concurrency/phase2_deadlock`, and `Phase2DeadlockTest.NaiveTransferServiceTests` proves the unordered version
+genuinely deadlocks using the JVM's own detector.
 
 **In a real system the lock is the database's**, not the JVM's: `SELECT … FOR UPDATE` in ascending id order, because a
 JVM lock does not survive two instances of the service. → `postgres/phase1_isolation`.
@@ -81,10 +81,11 @@ JVM lock does not survive two instances of the service. → `postgres/phase1_iso
 **Some invariants are not expressible as a row lock.** A shared overdraft limit across two accounts is **write skew**:
 each transaction reads a predicate the other is about to invalidate, and neither writes a row the other read — so a row
 lock would not have helped even if you had taken one. Fix with SERIALIZABLE (SSI detects the dependency and aborts one
-with `40001`) plus a retry, or materialise the conflict onto a single lockable row. → proved by `WriteSkewIT`.
+with `40001`) plus a retry, or materialise the conflict onto a single lockable row. → proved by `Phase1IsolationIT`.
 
 **And the database breaks its own deadlocks**, unlike the JVM: `deadlock_timeout`, a wait-graph check, and one victim
-killed with `40P01`. So `40P01` and `40001` belong in the same retry loop. → proved by `PgDeadlockIT`.
+killed with `40P01`. So `40P01` and `40001` belong in the same retry loop. → proved by
+`Phase6OperationsIT.PgDeadlockTests`.
 
 **The real bottleneck is a hot account**, not the lock strategy. Ordering does not fix contention on one row. Options:
 optimistic concurrency with retry; per-account queueing so one account's traffic serialises without blocking anyone
@@ -98,8 +99,8 @@ The debit is a database commit; telling anyone about it is a network call. There
 dual-write problem** — and it has no solution at the point of the write, only a displacement.
 
 **Transactional outbox.** Write the outgoing event into the *same database*, in the *same transaction* as the debit. A
-relay publishes from there. One atomic write, no window. → `kafka/payment`, proved by `OutboxIT` and
-`OutboxRedeliveryIT`.
+relay publishes from there. One atomic write, no window. → `kafka/payment`, proved by `Phase5OutboxIT` — its
+`AtomicityTests` for the write, its `CrashWindowRecoveryTests` for the window.
 
 Downstream consumers each get their own guarantees from the same stream: notifications can be lossy, fraud must be
 timely, reporting can lag, reconciliation must be complete. **Picking different guarantees per consumer is the point,
@@ -109,8 +110,8 @@ not an inconsistency.**
 outbox; it moves. Say that out loud — it is the staff-level version of the answer.
 
 **Ordering has a limit worth naming.** Keying by `accountId` gives per-account ordering — until a retry topic breaks it,
-because a failed event goes to the retry topic while the next one keeps flowing. → proved by `OrderingUnderRetryIT`,
-with the three ways out in `kafka/README.md`.
+because a failed event goes to the retry topic while the next one keeps flowing. → proved by
+`Phase4OrderingIT.UnderRetryTests`, with the three ways out in `kafka/README.md`.
 
 ---
 
@@ -133,14 +134,14 @@ The consumer reads both topics and matches the two halves of each payment by `pa
 
 | Failure | What happens | Where |
 |---|---|---|
-| Process dies after the DB commit, before the publish | Offset uncommitted, event redelivered, idempotency check declines to re-debit — and the outbox row is still pending, so the relay publishes it. Nothing is lost. | `OutboxRedeliveryIT` |
+| Process dies after the DB commit, before the publish | Offset uncommitted, event redelivered, idempotency check declines to re-debit — and the outbox row is still pending, so the relay publishes it. Nothing is lost. | `Phase5OutboxIT.CrashWindowRecoveryTests` |
 | Broker unavailable for 10 minutes | Outbox rows accumulate; the relay retries every 500ms and drains when it returns. Alert on **oldest unpublished row**, not queue depth. | `PaymentOutboxRelay` |
-| Consumer processes the same event twice | `processed_events` primary key. The constraint is the guarantee; the check is the optimization. | `IdempotencyIT` |
-| A consumer is slow and gets evicted mid-batch | Rebalance, partitions reassigned, uncommitted records redelivered to whoever picks them up — survivable *only* because the consumer is idempotent. | `RebalanceIT` |
+| Consumer processes the same event twice | `processed_events` primary key. The constraint is the guarantee; the check is the optimization. | `Phase2IdempotencyIT` |
+| A consumer is slow and gets evicted mid-batch | Rebalance, partitions reassigned, uncommitted records redelivered to whoever picks them up — survivable *only* because the consumer is idempotent. | `Phase6RebalancingIT` |
 | Downstream rail times out with **no response** | **The worst case**: you do not know whether it happened. You cannot retry blindly and you cannot assume failure. You need a *query* API on the rail, or a reversal — and a `PENDING` state to sit in meanwhile. | design-only |
 | A replica lags and the payer sees a stale balance | Route read-your-writes to the primary, or pin the session to the primary for a window after a write. | design-only |
-| A bad deploy poisons the DLT | DLT depth should alert at **zero** — every record is a customer's money. Records carry original topic/offset/exception for replay after the fix. | `DeadLetterIT` |
-| A long transaction is left open | Vacuum cannot reclaim anything newer than the oldest snapshot, so the table bloats even though rows are being deleted. `idle_in_transaction_session_timeout`. | `LongTxnBloatIT` |
+| A bad deploy poisons the DLT | DLT depth should alert at **zero** — every record is a customer's money. Records carry original topic/offset/exception for replay after the fix. | `Phase3RetriesDltIT.DeadLetterTests` |
+| A long transaction is left open | Vacuum cannot reclaim anything newer than the oldest snapshot, so the table bloats even though rows are being deleted. `idle_in_transaction_session_timeout`. | `Phase4PerformanceIT.LongTxnBloatTests` |
 
 ---
 

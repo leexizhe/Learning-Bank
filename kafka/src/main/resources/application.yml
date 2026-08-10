@@ -73,7 +73,7 @@ spring:
         # triggering a rebalance, by skipping the leave-group entirely. The cost is that a member that really has gone
         # away holds its partitions until session.timeout.ms elapses - and this test suite starts and stops application
         # contexts constantly, so enabling it globally would make every IT after a restart slower and flakier. Right
-        # answer in production, wrong answer here; see RebalanceIT.
+        # answer in production, wrong answer here; see Phase6RebalancingIT.
 
     listener:
       # THE reliability setting in this project. With the default (BATCH) ack mode Spring commits offsets after the

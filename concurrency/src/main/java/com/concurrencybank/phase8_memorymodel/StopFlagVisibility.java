@@ -20,7 +20,7 @@ package com.concurrencybank.phase8_memorymodel;
  * over three bytecodes, and no amount of {@code volatile} makes those three steps indivisible — that needs {@code
  * AtomicLong}'s CAS or a lock. <b>Use {@code volatile} for flags, never for counters</b> is the compressed version.
  *
- * <p>{@code StopFlagVisibilityTest} asserts the guarantee (the {@code volatile} loop always terminates) and merely
+ * <p>{@code Phase8MemoryModelTest} asserts the guarantee (the {@code volatile} loop always terminates) and merely
  * <em>observes</em> the anomaly (the plain loop is run on a daemon thread and whether it hangs is logged, not asserted)
  * — the same discipline as {@link UnsafePublication}, and for the same reason: whether the JIT chooses to hoist depends
  * on how long it warmed up, which is not something a build should depend on.

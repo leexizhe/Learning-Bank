@@ -26,7 +26,7 @@ import java.util.concurrent.locks.ReentrantLock;
  *
  * <p>{@link ReentrantLock} rather than {@code synchronized} so the class can grow a {@code tryLock} variant later
  * without restructuring, and because it's the form you'd want if TTL eviction were added on top — see {@code
- * ConcurrentLruCacheTest} for what's actually asserted.
+ * Phase7PrimitivesTest.ConcurrentLruCacheTests} for what's actually asserted.
  */
 public class ConcurrentLruCache<K, V> {
 

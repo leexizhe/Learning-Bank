@@ -34,17 +34,25 @@ public final class IndexFixture {
     /**
      * Big enough that walking the composite index in order beats sorting the whole account.
      *
-     * <p>This number is load-bearing for {@code CompositeOrderIT}, and 200 was on the wrong side of the line. At 200
-     * rows Postgres correctly reads the narrower {@code idx_postings_account_id} and top-N heapsorts the result — cost
-     * 28.9 against 32.8 for the ordered walk — so the "right index removes the Sort" assertion failed on a database
-     * with accurate statistics. The plan flips between 250 and 300 rows; 2000 clears it by a wide margin (cost 20.2
-     * against ~1900 to sort) while staying ~2% of the table, so the selective-vs-bulk contrast in {@code IndexPlanIT}
-     * still holds.
+     * <p>This number is load-bearing for {@code Phase5IndexingIT.CompositeOrderTests}, and 200 was on the wrong side
+     * of the line. At 200 rows Postgres correctly reads the narrower {@code idx_postings_account_id} and top-N
+     * heapsorts the result — cost 28.9 against 32.8 for the ordered walk — so the "right index removes the Sort"
+     * assertion failed on a database with accurate statistics. The plan flips between 250 and 300 rows; 2000 clears it
+     * by a wide margin (cost 20.2 against ~1900 to sort) while staying ~2% of the table, so the selective-vs-bulk
+     * contrast in {@code Phase5IndexingIT.IndexPlanTests} still holds.
      */
     public static final int SELECTIVE_ROWS = 2_000;
 
     private static final String SELECTIVE_OWNER = "index-fixture-selective";
     private static final String BULK_OWNER = "index-fixture-bulk";
+
+    /**
+     * Once per JVM, as the name promises. Without this, "seed once" meant "re-check on every call" — a connection plus
+     * four queries, one of them a {@code count(*)} over all 100k rows, before every single test that touches the
+     * fixture. The rows are documented read-only and nothing in the suite deletes them, so the second call has nothing
+     * left to learn.
+     */
+    private static volatile Fixture cached;
 
     private IndexFixture() {}
 
@@ -52,6 +60,10 @@ public final class IndexFixture {
     public record Fixture(long selectiveAccountId, long bulkAccountId) {}
 
     public static Fixture seedOnce(DataSource dataSource) throws Exception {
+        Fixture existing = cached;
+        if (existing != null) {
+            return existing;
+        }
         try (Connection c = dataSource.getConnection()) {
             c.setAutoCommit(true);
             long selective = findOrCreateAccount(c, SELECTIVE_OWNER);
@@ -60,8 +72,8 @@ public final class IndexFixture {
             // Each account is checked and seeded independently, and to an exact count. The two inserts are separate
             // autocommitted statements, so a run that dies between them leaves bulk seeded and selective empty; a
             // guard that only looked at bulk would accept that state forever, handing every later test an account
-            // with no rows and a plan to match. IndexPlanIT asserts the row count exactly, so "top up whatever is
-            // missing" is not good enough either - a wrong count is reset rather than added to.
+            // with no rows and a plan to match. Phase5IndexingIT.IndexPlanTests asserts the row count exactly, so
+            // "top up whatever is missing" is not good enough either - a wrong count is reset rather than added to.
             boolean seeded = reseedIfWrongSize(c, bulk, BULK_ROWS);
             seeded |= reseedIfWrongSize(c, selective, SELECTIVE_ROWS);
 
@@ -72,7 +84,9 @@ public final class IndexFixture {
                 // much as it is setup.
                 analyze(c);
             }
-            return new Fixture(selective, bulk);
+            Fixture fixture = new Fixture(selective, bulk);
+            cached = fixture;
+            return fixture;
         }
     }
 

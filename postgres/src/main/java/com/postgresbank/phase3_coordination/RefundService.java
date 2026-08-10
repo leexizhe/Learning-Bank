@@ -16,8 +16,9 @@ import org.springframework.transaction.annotation.Transactional;
  * that the "resource" being locked - here, {@code orderId} - is a convention enforced entirely by every caller agreeing
  * to lock on it before touching that order; Postgres doesn't know it means anything.
  *
- * <p>{@code duringHold} is a test seam (see AdvisoryLockIT), same idea as phase1's {@code afterRead} - it lets a test
- * force a second attempt to happen while the first still holds the lock, instead of hoping the timing lines up.
+ * <p>{@code duringHold} is a test seam (see {@code Phase3CoordinationIT.AdvisoryLockTests}), same idea as phase1's
+ * {@code afterRead} - it lets a test force a second attempt to happen while the first still holds the lock, instead of
+ * hoping the timing lines up.
  */
 @Service
 @RequiredArgsConstructor

@@ -15,9 +15,10 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * One transaction, three writes: the outbox event, the {@code transfers} row that owns the unique idempotency
  * constraint, and the two postings (debit + credit - double-entry, enforced here by construction rather than a database
- * CHECK). The outbox row is written <em>first</em> on purpose: it's what lets IdempotencyIT / OutboxIT prove the outbox
- * insert is not durable on its own - if the {@code transfers} insert that follows it hits the unique-key violation,
- * this whole method's transaction rolls back and takes the "already inserted" outbox row down with it. Same
+ * CHECK). The outbox row is written <em>first</em> on purpose: it's what lets {@code Phase2LedgerIT.IdempotencyTests}
+ * and {@code Phase3CoordinationIT.OutboxTests} prove the outbox insert is not durable on its own - if the
+ * {@code transfers} insert that follows it hits the unique-key violation, this whole method's transaction rolls back
+ * and takes the "already inserted" outbox row down with it. Same
  * transaction, no partial state, regardless of write order.
  */
 @Component

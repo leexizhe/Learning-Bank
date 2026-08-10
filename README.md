@@ -13,13 +13,10 @@ easy part, being able to say *why* each line is there is the interview.
 | [`kafka`](kafka/README.md)             | Event-driven payments: ordering, idempotent consumers, the transactional outbox, retries, dead-letter topics, rebalancing                    | 8082 |
 | [`postgres`](postgres/README.md)       | PostgreSQL internals: MVCC and write skew, the append-only ledger, advisory locks, vacuum and bloat, indexes and query plans, online DDL     | 8083 |
 
-Two documents cut across all three:
+One document cuts across the modules:
 
 - **[`DESIGN.md`](DESIGN.md)** — the money-movement system these modules are slices of, written as a 45-minute
   system-design answer. Every claim in it points at code here and a test that proves it.
-- **[`INTERVIEW-PREP.md`](INTERVIEW-PREP.md)** — a ranked gap analysis of this repo: what is still missing, what an
-  interviewer probes that there is no answer for yet, and the depth ladders (mid / senior / staff) for the questions
-  that matter.
 
 The modules differ in how much they can prove without a container. `concurrency` is mostly plain-Java unit tests,
 because that's the shape of a live-coding round. `kafka`, `postgres` and `acra` have **no unit-test layer at all** —

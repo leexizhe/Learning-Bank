@@ -3,7 +3,7 @@ package com.concurrencybank.phase8_memorymodel;
 /**
  * The same unsafe publication as {@link UnsafePublication} — plain field, no {@code volatile}, no lock — with exactly
  * one character changed: the holder's field is {@code final}. That one keyword makes the anomaly <b>impossible</b>
- * rather than merely unlikely, and {@code FinalFieldFreezeTest} asserts it outright.
+ * rather than merely unlikely, and {@code Phase8MemoryModelTest.FinalFieldFreezeTests} asserts it outright.
  *
  * <p><b>The final-field freeze.</b> The JMM gives {@code final} fields a special guarantee that no other field has: a
  * freeze action occurs at the end of the constructor, and any thread that reads the object through a reference it

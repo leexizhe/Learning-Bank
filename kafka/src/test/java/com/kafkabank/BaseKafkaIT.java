@@ -30,9 +30,12 @@ import org.springframework.kafka.test.utils.KafkaTestUtils;
  * response, a row in Postgres, or a record actually consumed off a topic — never on a mock or an internal call count.
  * Kafka is asynchronous, so "did it work?" is always "did it become true within a time budget?", which is what
  * Awaitility is for in the subclasses.
+ *
+ * <p>Public, and left in this root package alongside {@link TestContainerConfig}, because every phase package extends
+ * it from outside — the same arrangement the postgres module uses.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-abstract class BaseKafkaIT extends TestContainerConfig {
+public abstract class BaseKafkaIT extends TestContainerConfig {
 
     /**
      * Under {@code RANDOM_PORT} Boot auto-configures this bean already pointed at the running server, so tests use

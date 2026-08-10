@@ -34,7 +34,7 @@ CREATE INDEX IF NOT EXISTS idx_postings_account_id ON postings(account_id);
 -- Composite, and the column order is the whole point: equality columns first, then the range/sort column. This serves
 -- "WHERE account_id = ? ORDER BY created_at DESC, id DESC" as a single index range scan with the rows already in the
 -- right order, so the planner needs no Sort node on top. Reverse the columns and it cannot -
--- phase5_indexing.CompositeOrderIT proves that against real query plans rather than asserting it.
+-- phase5_indexing.Phase5IndexingIT.CompositeOrderTests proves that against real query plans rather than asserting it.
 --
 -- DESC matches the query's ORDER BY. B-trees can be walked backwards, so this is not strictly required, but stating it
 -- keeps the index and the query obviously aligned. The trailing id breaks ties on identical created_at, which is what
@@ -110,8 +110,8 @@ CREATE TABLE IF NOT EXISTS account_balance_snapshots (
 -- - at the cost of doubling every quote inside.
 --
 -- The NULL check on the first line is load-bearing: phase1_isolation posts standalone debits with transfer_id NULL (the
--- write-skew demo), and transfer_id is nullable by explicit design. Without it, WriteSkewIT and JointOverdraftService
--- break immediately.
+-- write-skew demo), and transfer_id is nullable by explicit design. Without it, Phase1IsolationIT and
+-- JointOverdraftService break immediately.
 CREATE OR REPLACE FUNCTION assert_transfer_balanced() RETURNS trigger LANGUAGE plpgsql AS
 'DECLARE
     total BIGINT;

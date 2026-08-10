@@ -16,8 +16,8 @@ import lombok.Setter;
 /**
  * One row per ledger movement. Never UPDATEd for balance purposes - a transfer inserts a debit and a credit row and
  * nothing is ever mutated afterward, which is what makes {@link LedgerService#balanceOf} safe to compute as a plain
- * {@code SUM}. {@code note} is deliberately not indexed: phase2_ledger's HotUpdateIT updates it repeatedly to
- * demonstrate HOT (Heap-Only Tuple) updates, which only apply to non-indexed columns.
+ * {@code SUM}. {@code note} is deliberately not indexed: phase2_ledger's {@code Phase2LedgerIT.HotUpdateTests} updates
+ * it repeatedly to demonstrate HOT (Heap-Only Tuple) updates, which only apply to non-indexed columns.
  */
 @Getter
 @Entity

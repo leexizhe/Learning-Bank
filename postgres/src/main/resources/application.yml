@@ -15,9 +15,10 @@ spring:
       # contention, so throughput goes down while latency goes up. The usual starting point is around (cores * 2) +
       # effective_spindles, which for most services is nearer 10 than 100.
       #
-      # 20 here is a TEST-SUITE number, not a production one: SkipLockedIT alone runs 8 workers, and phase5/phase6 hold
-      # several raw JDBC connections open at once on purpose (long transactions, deliberate deadlocks, CREATE INDEX
-      # CONCURRENTLY racing inserts). Boot's default of 10 is enough to deadlock the suite against itself rather than
+      # 20 here is a TEST-SUITE number, not a production one: Phase3CoordinationIT.SkipLockedTests alone runs 8
+      # workers, and phase5/phase6 hold several raw JDBC connections open at once on purpose (long transactions,
+      # deliberate deadlocks, CREATE INDEX CONCURRENTLY racing inserts). Boot's default of 10 is enough to deadlock
+      # the suite against itself rather than
       # against Postgres.
       maximum-pool-size: 20
       # Fail a connection request outright rather than parking a request thread forever when the pool is exhausted - the

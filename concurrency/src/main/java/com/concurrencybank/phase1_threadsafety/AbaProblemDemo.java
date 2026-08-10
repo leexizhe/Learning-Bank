@@ -31,7 +31,8 @@ import java.util.concurrent.atomic.AtomicStampedReference;
  * guarantee is bounded rather than absolute is the honest version of the answer.
  *
  * <p>Note this needs no threads to demonstrate: ABA is about the <em>sequence of values</em>, not about timing, so
- * {@code AbaProblemDemoTest} performs the A -> B -> A sequence on one thread and the CAS still can't tell.
+ * {@code Phase1ThreadSafetyTest.AbaProblemDemoTests} performs the A -> B -> A sequence on one thread and the CAS still
+ * can't tell.
  */
 public class AbaProblemDemo {
 

@@ -15,7 +15,8 @@ import java.util.function.LongSupplier;
  * requests at 11:59:59 and 100 more at 12:00:01 is 200 requests in two seconds, and every one of them is inside the
  * stated policy. The downstream you were protecting sees a 2× spike at exactly the moment your dashboard says you were
  * compliant. A sliding window can't produce that, because at 12:00:01 the 11:59:59 grants are still inside the trailing
- * window and still counted — {@code SlidingWindowRateLimiterTest} asserts precisely this difference.
+ * window and still counted — {@code Phase7PrimitivesTest.SlidingWindowRateLimiterTests} asserts precisely this
+ * difference.
  *
  * <p><b>What it costs:</b> O(limit) memory per limiter, because every grant in the current window is a retained
  * timestamp. That's the honest trade against {@link TokenBucketRateLimiter}, which is O(1) state regardless of rate. At
