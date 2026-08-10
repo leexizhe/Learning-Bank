@@ -2,6 +2,7 @@ package com.postgresbank.phase2_ledger;
 
 import com.postgresbank.common.Transfer;
 import com.postgresbank.common.TransferRepository;
+import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
@@ -15,15 +16,11 @@ import org.springframework.stereotype.Service;
  * transactions - the failed insert attempt, and the read-what-already-exists that follows it - genuinely separate.
  */
 @Service
+@RequiredArgsConstructor
 public class TransferService {
 
     private final TransferTransactionalOps ops;
     private final TransferRepository transfers;
-
-    public TransferService(TransferTransactionalOps ops, TransferRepository transfers) {
-        this.ops = ops;
-        this.transfers = transfers;
-    }
 
     public TransferResult transfer(String idempotencyKey, long fromAccountId, long toAccountId, long amountMinor) {
         try {

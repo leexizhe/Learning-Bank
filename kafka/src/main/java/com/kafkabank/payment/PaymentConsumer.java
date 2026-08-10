@@ -2,6 +2,7 @@ package com.kafkabank.payment;
 
 import com.kafkabank.common.PaymentInitiated;
 import com.kafkabank.common.Topics;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.DltHandler;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -19,13 +20,10 @@ import org.springframework.stereotype.Component;
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class PaymentConsumer {
 
     private final PaymentProcessingService paymentProcessingService;
-
-    public PaymentConsumer(PaymentProcessingService paymentProcessingService) {
-        this.paymentProcessingService = paymentProcessingService;
-    }
 
     /**
      * <b>{@code @RetryableTopic} = non-blocking retries.</b> The naive way to retry is to sleep and loop inside the

@@ -3,6 +3,7 @@ package com.postgresbank.phase4_performance;
 import com.postgresbank.common.Account;
 import com.postgresbank.common.AccountRepository;
 import java.util.List;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -15,13 +16,10 @@ import org.springframework.transaction.annotation.Transactional;
  * that JOIN FETCH "should" be faster.
  */
 @Service
+@RequiredArgsConstructor
 public class AccountHistoryService {
 
     private final AccountRepository accounts;
-
-    public AccountHistoryService(AccountRepository accounts) {
-        this.accounts = accounts;
-    }
 
     @Transactional(readOnly = true)
     public int loadNPlusOne(List<Long> accountIds) {

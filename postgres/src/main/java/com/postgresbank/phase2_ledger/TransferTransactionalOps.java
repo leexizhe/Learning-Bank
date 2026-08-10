@@ -8,6 +8,7 @@ import com.postgresbank.common.Posting;
 import com.postgresbank.common.PostingRepository;
 import com.postgresbank.common.Transfer;
 import com.postgresbank.common.TransferRepository;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,23 +21,13 @@ import org.springframework.transaction.annotation.Transactional;
  * transaction, no partial state, regardless of write order.
  */
 @Component
+@RequiredArgsConstructor
 public class TransferTransactionalOps {
 
     private final AccountRepository accounts;
     private final PostingRepository postings;
     private final TransferRepository transfers;
     private final OutboxRepository outbox;
-
-    public TransferTransactionalOps(
-            AccountRepository accounts,
-            PostingRepository postings,
-            TransferRepository transfers,
-            OutboxRepository outbox) {
-        this.accounts = accounts;
-        this.postings = postings;
-        this.transfers = transfers;
-        this.outbox = outbox;
-    }
 
     @Transactional
     public Long apply(String idempotencyKey, long fromAccountId, long toAccountId, long amountMinor) {

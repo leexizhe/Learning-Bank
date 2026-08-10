@@ -1,5 +1,6 @@
 package com.kafkabank.payment;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -30,13 +31,10 @@ import org.springframework.transaction.event.TransactionalEventListener;
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class PaymentOutboxRelay {
 
     private final PaymentOutboxRelayOps ops;
-
-    public PaymentOutboxRelay(PaymentOutboxRelayOps ops) {
-        this.ops = ops;
-    }
 
     /**
      * The durability sweep. Note this calls {@code ops.relayOnce()} on another bean rather than a local {@code

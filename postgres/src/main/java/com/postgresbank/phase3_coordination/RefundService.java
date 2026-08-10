@@ -1,6 +1,7 @@
 package com.postgresbank.phase3_coordination;
 
 import jakarta.persistence.EntityManager;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -19,13 +20,10 @@ import org.springframework.transaction.annotation.Transactional;
  * force a second attempt to happen while the first still holds the lock, instead of hoping the timing lines up.
  */
 @Service
+@RequiredArgsConstructor
 public class RefundService {
 
     private final EntityManager em;
-
-    public RefundService(EntityManager em) {
-        this.em = em;
-    }
 
     @Transactional
     public boolean tryRefund(long orderId, Runnable duringHold) {

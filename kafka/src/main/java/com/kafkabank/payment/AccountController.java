@@ -3,6 +3,7 @@ package com.kafkabank.payment;
 import com.kafkabank.payment.entity.Account;
 import com.kafkabank.payment.repository.AccountRepository;
 import java.util.List;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.transaction.annotation.Transactional;
@@ -13,13 +14,10 @@ import org.springframework.web.bind.annotation.RestController;
 
 /** Read side of the payment role — lets a test (or a human) see the effect of a consumed event. */
 @RestController
+@RequiredArgsConstructor
 public class AccountController {
 
     private final AccountRepository accounts;
-
-    public AccountController(AccountRepository accounts) {
-        this.accounts = accounts;
-    }
 
     public record AccountView(Long id, String owner, long balanceMinor) {}
 

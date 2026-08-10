@@ -1,7 +1,8 @@
-package com.acrabank.profile;
+package com.acrabank.mapper;
 
-import com.acrabank.client.AcraApiException;
-import com.acrabank.client.ProfileNotFoundException;
+import com.acrabank.entity.BusinessProfile;
+import com.acrabank.exception.AcraApiException;
+import com.acrabank.exception.ProfileNotFoundException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -11,6 +12,7 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Optional;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -41,6 +43,7 @@ import org.springframework.stereotype.Component;
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class ProfileMapper {
 
     private static final String ENTITIES = "/entities";
@@ -56,10 +59,6 @@ public class ProfileMapper {
             List.of(DateTimeFormatter.ISO_LOCAL_DATE, DateTimeFormatter.ofPattern("dd/MM/uuuu"));
 
     private final ObjectMapper json;
-
-    public ProfileMapper(ObjectMapper json) {
-        this.json = json;
-    }
 
     public JsonNode parse(String payload) {
         try {

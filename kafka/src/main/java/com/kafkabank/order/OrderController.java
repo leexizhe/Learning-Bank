@@ -1,6 +1,7 @@
 package com.kafkabank.order;
 
 import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -15,13 +16,10 @@ import org.springframework.web.bind.annotation.RestController;
  * quietly becoming a monolith with a Kafka topic bolted on.
  */
 @RestController
+@RequiredArgsConstructor
 public class OrderController {
 
     private final PaymentInitiationService paymentInitiationService;
-
-    public OrderController(PaymentInitiationService paymentInitiationService) {
-        this.paymentInitiationService = paymentInitiationService;
-    }
 
     /**
      * 202 Accepted, not 201 Created. Nothing has been debited when this returns — the only thing that has happened is a

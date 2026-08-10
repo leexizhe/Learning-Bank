@@ -1,4 +1,4 @@
-package com.acrabank.profile;
+package com.acrabank.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -57,7 +57,9 @@ public class BusinessProfile {
         this.uen = uen;
     }
 
-    void refresh(
+    // Public only because ProfileMapper lives in another package now. It is still meant to be called by the mapper and
+    // nothing else - the setters this entity deliberately does not have would be the wider hole.
+    public void refresh(
             String payload,
             String entityName,
             String entityStatus,

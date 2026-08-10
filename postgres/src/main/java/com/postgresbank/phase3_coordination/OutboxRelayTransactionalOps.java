@@ -3,6 +3,7 @@ package com.postgresbank.phase3_coordination;
 import com.postgresbank.common.Outbox;
 import com.postgresbank.common.OutboxRepository;
 import java.util.List;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Limit;
 import org.springframework.stereotype.Component;
@@ -36,6 +37,7 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class OutboxRelayTransactionalOps {
 
     /**
@@ -46,10 +48,6 @@ public class OutboxRelayTransactionalOps {
     private static final Limit BATCH = Limit.of(100);
 
     private final OutboxRepository outbox;
-
-    public OutboxRelayTransactionalOps(OutboxRepository outbox) {
-        this.outbox = outbox;
-    }
 
     /**
      * Logging stands in for the publish call — see {@code kafka-bank}'s {@code PaymentOutboxRelayOps} for the same

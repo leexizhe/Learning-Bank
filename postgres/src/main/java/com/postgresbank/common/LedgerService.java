@@ -1,6 +1,7 @@
 package com.postgresbank.common;
 
 import java.util.List;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 /**
@@ -9,13 +10,10 @@ import org.springframework.stereotype.Service;
  * view over history, not a mutable fact that can drift from it.
  */
 @Service
+@RequiredArgsConstructor
 public class LedgerService {
 
     private final PostingRepository postings;
-
-    public LedgerService(PostingRepository postings) {
-        this.postings = postings;
-    }
 
     public long balanceOf(long accountId) {
         return postings.sumAmountByAccountId(accountId);

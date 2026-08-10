@@ -5,6 +5,7 @@ import com.postgresbank.common.AccountRepository;
 import com.postgresbank.common.LedgerService;
 import com.postgresbank.common.Posting;
 import com.postgresbank.common.PostingRepository;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,18 +27,12 @@ import org.springframework.transaction.annotation.Transactional;
  * "usually, if the timing lines up." Production callers pass a no-op.
  */
 @Component
+@RequiredArgsConstructor
 public class JointOverdraftTransactionalOps {
 
     private final LedgerService ledger;
     private final AccountRepository accounts;
     private final PostingRepository postings;
-
-    public JointOverdraftTransactionalOps(
-            LedgerService ledger, AccountRepository accounts, PostingRepository postings) {
-        this.ledger = ledger;
-        this.accounts = accounts;
-        this.postings = postings;
-    }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public void withdrawReadCommitted(

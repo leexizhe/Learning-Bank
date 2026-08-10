@@ -1,5 +1,6 @@
 package com.postgresbank.phase3_coordination;
 
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -8,17 +9,12 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@RequiredArgsConstructor
 public class CoordinationController {
 
     private final RefundService refunds;
     private final JobRunner jobs;
     private final PaymentJobRepository jobRepository;
-
-    public CoordinationController(RefundService refunds, JobRunner jobs, PaymentJobRepository jobRepository) {
-        this.refunds = refunds;
-        this.jobs = jobs;
-        this.jobRepository = jobRepository;
-    }
 
     @PostMapping("/api/refunds/{orderId}")
     public RefundResponse refund(@PathVariable long orderId) {

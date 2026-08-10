@@ -3,6 +3,7 @@ package com.postgresbank.phase4_performance;
 import com.postgresbank.common.PostingRepository;
 import java.time.Instant;
 import java.util.List;
+import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -23,13 +24,10 @@ import org.springframework.web.bind.annotation.RestController;
  * that.
  */
 @RestController
+@RequiredArgsConstructor
 public class PostingHistoryController {
 
     private final PostingRepository postings;
-
-    public PostingHistoryController(PostingRepository postings) {
-        this.postings = postings;
-    }
 
     @GetMapping("/api/accounts/{accountId}/postings")
     public PagedPostings history(@PathVariable long accountId, Pageable pageable) {

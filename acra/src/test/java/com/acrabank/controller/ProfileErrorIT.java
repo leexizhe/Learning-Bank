@@ -1,8 +1,9 @@
-package com.acrabank.profile;
+package com.acrabank.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.acrabank.AcraTestBase;
+import com.acrabank.entity.BusinessProfile;
 import com.acrabank.testsupport.FakeAcraServer;
 import java.time.Duration;
 import org.junit.jupiter.api.Test;

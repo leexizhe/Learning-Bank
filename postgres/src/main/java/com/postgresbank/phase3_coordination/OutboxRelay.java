@@ -1,5 +1,6 @@
 package com.postgresbank.phase3_coordination;
 
+import lombok.RequiredArgsConstructor;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -15,13 +16,10 @@ import org.springframework.stereotype.Component;
  * {@code OutboxIT}; tests don't wait out a real scheduling interval, they invoke the same method the scheduler would.
  */
 @Component
+@RequiredArgsConstructor
 public class OutboxRelay {
 
     private final OutboxRelayTransactionalOps ops;
-
-    public OutboxRelay(OutboxRelayTransactionalOps ops) {
-        this.ops = ops;
-    }
 
     @Scheduled(fixedDelay = 2000)
     public void poll() {

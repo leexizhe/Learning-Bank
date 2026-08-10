@@ -1,6 +1,7 @@
 package com.acrabank.client;
 
 import com.acrabank.config.AcraProperties;
+import com.acrabank.exception.AcraApiException;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.nio.charset.StandardCharsets;
@@ -10,6 +11,7 @@ import java.time.Instant;
 import java.util.Base64;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -39,6 +41,7 @@ import org.springframework.web.client.RestClient;
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class AcraTokenProvider {
 
     private final RestClient http;
@@ -51,12 +54,6 @@ public class AcraTokenProvider {
     // without touching this lock at all. Its job is to stop a burst of requests arriving on an empty cache from firing
     // N simultaneous token calls - a stampede that ACRA would see as a small denial of service.
     private final ReentrantLock refreshLock = new ReentrantLock();
-
-    public AcraTokenProvider(RestClient acraRestClient, AcraProperties properties, Clock clock) {
-        this.http = acraRestClient;
-        this.properties = properties;
-        this.clock = clock;
-    }
 
     public String token() {
         CachedToken current = cached.get();

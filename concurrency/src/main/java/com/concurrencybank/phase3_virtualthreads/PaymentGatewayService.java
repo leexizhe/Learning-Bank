@@ -15,6 +15,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.StructuredTaskScope;
 import java.util.concurrent.StructuredTaskScope.Joiner;
 import java.util.concurrent.StructuredTaskScope.Subtask;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 /**
@@ -28,6 +29,7 @@ import org.springframework.stereotype.Service;
  * calls overlap: wall-clock time is roughly the slowest single check, not the sum of all three.
  */
 @Service
+@RequiredArgsConstructor
 public class PaymentGatewayService {
 
     private static final int POOL_SIZE = 6;
@@ -40,15 +42,6 @@ public class PaymentGatewayService {
     // own executor" made concrete - this method's async chain never competes with validateWithExecutorService's work
     // for the same threads.
     private final ExecutorService completableFutureExecutor = Executors.newFixedThreadPool(3);
-
-    public PaymentGatewayService(
-            FraudCheckClient fraudCheckClient,
-            CreditCheckClient creditCheckClient,
-            SanctionsCheckClient sanctionsCheckClient) {
-        this.fraudCheckClient = fraudCheckClient;
-        this.creditCheckClient = creditCheckClient;
-        this.sanctionsCheckClient = sanctionsCheckClient;
-    }
 
     public GatewayDecision validate(String transactionId) {
         try (var scope = StructuredTaskScope.open(Joiner.<ValidationResult>allSuccessfulOrThrow())) {

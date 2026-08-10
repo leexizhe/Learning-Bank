@@ -13,6 +13,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param profileTtl how stale a stored profile may be before a read re-fetches it
  * @param expiryFallback token lifetime assumed when the response omits {@code expires_in}
  * @param expirySkew how far before the stated expiry to give up on a cached token
+ * @param tokenCacheTtl how long {@code SimpleAcraService} keeps its token in Redis - its whole expiry policy
  * @param requestTimeout connect and read timeout for both ACRA calls
  */
 @ConfigurationProperties("acra")
@@ -23,4 +24,5 @@ public record AcraProperties(
         Duration profileTtl,
         Duration expiryFallback,
         Duration expirySkew,
+        Duration tokenCacheTtl,
         Duration requestTimeout) {}

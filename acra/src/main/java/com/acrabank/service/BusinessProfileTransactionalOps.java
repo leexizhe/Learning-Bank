@@ -1,8 +1,12 @@
-package com.acrabank.profile;
+package com.acrabank.service;
 
+import com.acrabank.entity.BusinessProfile;
+import com.acrabank.mapper.ProfileMapper;
+import com.acrabank.repository.BusinessProfileRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.time.Instant;
 import java.util.Optional;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,15 +20,11 @@ import org.springframework.transaction.annotation.Transactional;
  * all. Same reasoning as {@code OutboxRelayTransactionalOps} in the postgres module.
  */
 @Component
+@RequiredArgsConstructor
 public class BusinessProfileTransactionalOps {
 
     private final BusinessProfileRepository profiles;
     private final ProfileMapper mapper;
-
-    public BusinessProfileTransactionalOps(BusinessProfileRepository profiles, ProfileMapper mapper) {
-        this.profiles = profiles;
-        this.mapper = mapper;
-    }
 
     @Transactional(readOnly = true)
     public Optional<BusinessProfile> find(String uen) {

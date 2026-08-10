@@ -1,18 +1,16 @@
 package com.postgresbank.phase1_isolation;
 
 import jakarta.validation.constraints.Positive;
+import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@RequiredArgsConstructor
 public class OverdraftController {
 
     private final JointOverdraftService overdraft;
-
-    public OverdraftController(JointOverdraftService overdraft) {
-        this.overdraft = overdraft;
-    }
 
     /** {@code isolation=READ_COMMITTED} reproduces write skew; {@code SERIALIZABLE} prevents it. */
     @PostMapping("/api/overdraft/withdraw")

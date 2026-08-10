@@ -1,4 +1,4 @@
-package com.acrabank.client;
+package com.acrabank.exception;
 
 import lombok.Getter;
 

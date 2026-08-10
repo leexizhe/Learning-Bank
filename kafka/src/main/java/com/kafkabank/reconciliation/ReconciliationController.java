@@ -5,6 +5,7 @@ import com.kafkabank.common.ReconciliationState;
 import com.kafkabank.reconciliation.entity.ReconciliationRecord;
 import com.kafkabank.reconciliation.repository.ReconciliationRecordRepository;
 import java.util.List;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -17,13 +18,10 @@ import org.springframework.web.bind.annotation.RestController;
  * owns this state — the order role published an event and forgot about it.
  */
 @RestController
+@RequiredArgsConstructor
 public class ReconciliationController {
 
     private final ReconciliationRecordRepository records;
-
-    public ReconciliationController(ReconciliationRecordRepository records) {
-        this.records = records;
-    }
 
     public record ReconciliationView(
             String paymentId,

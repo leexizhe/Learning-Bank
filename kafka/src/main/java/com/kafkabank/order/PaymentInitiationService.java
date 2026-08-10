@@ -7,6 +7,7 @@ import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.SendResult;
@@ -23,6 +24,7 @@ import org.springframework.stereotype.Service;
  */
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class PaymentInitiationService {
 
     /**
@@ -35,10 +37,6 @@ public class PaymentInitiationService {
     private static final Duration PUBLISH_TIMEOUT = Duration.ofSeconds(10);
 
     private final KafkaTemplate<String, Object> kafkaTemplate;
-
-    public PaymentInitiationService(KafkaTemplate<String, Object> kafkaTemplate) {
-        this.kafkaTemplate = kafkaTemplate;
-    }
 
     public InitiatePaymentResponse initiate(Long accountId, long amountMinor, String description) {
         String paymentId = UUID.randomUUID().toString();

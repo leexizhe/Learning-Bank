@@ -3,6 +3,7 @@ package com.kafkabank.reconciliation;
 import com.kafkabank.common.PaymentInitiated;
 import com.kafkabank.common.PaymentResult;
 import com.kafkabank.common.Topics;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
@@ -28,15 +29,12 @@ import org.springframework.stereotype.Component;
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class ReconciliationConsumer {
 
     private static final String GROUP = "reconciliation-service";
 
     private final ReconciliationService reconciliationService;
-
-    public ReconciliationConsumer(ReconciliationService reconciliationService) {
-        this.reconciliationService = reconciliationService;
-    }
 
     /**
      * No {@code @RetryableTopic} here, deliberately. Reconciliation is derived, eventually-consistent bookkeeping — if

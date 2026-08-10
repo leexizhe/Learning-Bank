@@ -2,6 +2,7 @@ package com.postgresbank.phase6_operations;
 
 import com.postgresbank.common.PostingRepository;
 import java.util.Optional;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 /**
@@ -35,18 +36,12 @@ import org.springframework.stereotype.Service;
  * system stays correct, just slower.
  */
 @Service
+@RequiredArgsConstructor
 public class BalanceSnapshotService {
 
     private final PostingRepository postings;
     private final BalanceSnapshotRepository snapshots;
     private final BalanceSnapshotTransactionalOps ops;
-
-    public BalanceSnapshotService(
-            PostingRepository postings, BalanceSnapshotRepository snapshots, BalanceSnapshotTransactionalOps ops) {
-        this.postings = postings;
-        this.snapshots = snapshots;
-        this.ops = ops;
-    }
 
     /**
      * Identical to {@code LedgerService.balanceOf}, but reads only the postings since the last checkpoint.

@@ -1,5 +1,8 @@
 package com.acrabank.client;
 
+import com.acrabank.exception.AcraApiException;
+import com.acrabank.exception.ProfileNotFoundException;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -12,17 +15,13 @@ import org.springframework.web.client.RestClient;
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class AcraProfileClient {
 
     private static final String PROFILE_PATH = "/api/acra/entityQuery/businessProfile";
 
     private final RestClient http;
     private final AcraTokenProvider tokens;
-
-    public AcraProfileClient(RestClient acraRestClient, AcraTokenProvider tokens) {
-        this.http = acraRestClient;
-        this.tokens = tokens;
-    }
 
     public String fetch(String uen) {
         String token = tokens.token();

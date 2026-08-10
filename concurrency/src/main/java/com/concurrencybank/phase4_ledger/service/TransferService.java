@@ -5,6 +5,7 @@ import com.concurrencybank.phase4_ledger.entity.Account;
 import com.concurrencybank.phase4_ledger.exception.AccountNotFoundException;
 import com.concurrencybank.phase4_ledger.exception.InsufficientFundsException;
 import com.concurrencybank.phase4_ledger.repository.AccountRepository;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,13 +19,10 @@ import org.springframework.transaction.annotation.Transactional;
  * and releases its locks, instead of the two transactions deadlocking on each other's rows.
  */
 @Service
+@RequiredArgsConstructor
 public class TransferService {
 
     private final AccountRepository accounts;
-
-    public TransferService(AccountRepository accounts) {
-        this.accounts = accounts;
-    }
 
     @Transactional
     public TransferResponse transfer(Long fromAccountId, Long toAccountId, long amountMinor) {

@@ -1,6 +1,7 @@
 package com.postgresbank.phase1_isolation;
 
 import java.sql.SQLException;
+import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 
@@ -16,16 +17,13 @@ import org.springframework.stereotype.Service;
  * before, but the SQLState itself is Postgres's own contract and won't.
  */
 @Service
+@RequiredArgsConstructor
 public class JointOverdraftService {
 
     private static final String SERIALIZATION_FAILURE_SQLSTATE = "40001";
     private static final int MAX_ATTEMPTS = 10;
 
     private final JointOverdraftTransactionalOps ops;
-
-    public JointOverdraftService(JointOverdraftTransactionalOps ops) {
-        this.ops = ops;
-    }
 
     public void withdrawReadCommitted(long debitAccountId, long partnerAccountId, long amountMinor) {
         withdrawReadCommitted(debitAccountId, partnerAccountId, amountMinor, () -> {});

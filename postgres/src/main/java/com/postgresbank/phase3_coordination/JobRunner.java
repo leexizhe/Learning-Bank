@@ -3,6 +3,7 @@ package com.postgresbank.phase3_coordination;
 import jakarta.persistence.EntityManager;
 import java.util.List;
 import java.util.Optional;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,13 +19,10 @@ import org.springframework.transaction.annotation.Transactional;
  * point here is the SQL itself, not a Spring Data lock-mode abstraction over it.
  */
 @Service
+@RequiredArgsConstructor
 public class JobRunner {
 
     private final EntityManager em;
-
-    public JobRunner(EntityManager em) {
-        this.em = em;
-    }
 
     @Transactional
     public Optional<Long> claimNext() {

@@ -1,8 +1,10 @@
-package com.acrabank.profile;
+package com.acrabank.controller;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import java.time.Instant;
-import java.time.LocalDate;
+import com.acrabank.dto.ProfileResponse;
+import com.acrabank.entity.BusinessProfile;
+import com.acrabank.mapper.ProfileMapper;
+import com.acrabank.service.BusinessProfileService;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -11,15 +13,11 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@RequiredArgsConstructor
 public class BusinessProfileController {
 
     private final BusinessProfileService profiles;
     private final ProfileMapper mapper;
-
-    public BusinessProfileController(BusinessProfileService profiles, ProfileMapper mapper) {
-        this.profiles = profiles;
-        this.mapper = mapper;
-    }
 
     /**
      * Read-through: answers from Postgres while the stored copy is inside the TTL, calls ACRA otherwise. {@code
@@ -46,13 +44,4 @@ public class BusinessProfileController {
         BusinessProfile profile = profiles.get(uen, refresh);
         return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(profile.getPayload());
     }
-
-    public record ProfileResponse(
-            String uen,
-            String entityName,
-            String entityStatus,
-            String entityType,
-            LocalDate registrationDate,
-            Instant fetchedAt,
-            JsonNode payload) {}
 }

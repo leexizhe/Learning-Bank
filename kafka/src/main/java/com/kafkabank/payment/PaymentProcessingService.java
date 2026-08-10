@@ -13,6 +13,7 @@ import com.kafkabank.payment.repository.AccountRepository;
 import com.kafkabank.payment.repository.PaymentOutboxRepository;
 import com.kafkabank.payment.repository.ProcessedEventRepository;
 import java.util.UUID;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
@@ -40,6 +41,7 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class PaymentProcessingService {
 
     private final AccountRepository accounts;
@@ -48,21 +50,6 @@ public class PaymentProcessingService {
     private final ObjectMapper objectMapper;
     private final ApplicationEventPublisher events;
     private final SimulatedTransientFailure simulatedFailure;
-
-    public PaymentProcessingService(
-            AccountRepository accounts,
-            ProcessedEventRepository processedEvents,
-            PaymentOutboxRepository outbox,
-            ObjectMapper objectMapper,
-            ApplicationEventPublisher events,
-            SimulatedTransientFailure simulatedFailure) {
-        this.accounts = accounts;
-        this.processedEvents = processedEvents;
-        this.outbox = outbox;
-        this.objectMapper = objectMapper;
-        this.events = events;
-        this.simulatedFailure = simulatedFailure;
-    }
 
     /**
      * @throws UnknownAccountException when the message is unprocessable — triggers retry and eventually the DLT

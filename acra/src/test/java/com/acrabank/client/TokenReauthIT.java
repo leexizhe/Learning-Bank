@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.acrabank.AcraTestBase;
+import com.acrabank.exception.AcraApiException;
 import com.acrabank.testsupport.FakeAcraServer;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;

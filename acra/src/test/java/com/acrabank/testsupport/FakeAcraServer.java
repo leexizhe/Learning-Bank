@@ -36,6 +36,8 @@ public final class FakeAcraServer implements AutoCloseable {
     public static final String TOKEN_PATH = "/authorizeServer/oauth/token";
     public static final String PROFILE_PATH = "/api/acra/entityQuery/businessProfile";
 
+    private static final String APPLICATION_JSON = "application/json";
+
     /**
      * The genuine sandbox response for UEN 16888888A, copied verbatim from a live call rather than invented. That
      * matters: a hand-written sample tests the shape you imagined, which is exactly the shape the code was written
@@ -203,7 +205,7 @@ public final class FakeAcraServer implements AutoCloseable {
 
     private void respond(HttpExchange exchange, int status, String body) throws IOException {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
-        exchange.getResponseHeaders().add("Content-Type", "application/json");
+        exchange.getResponseHeaders().add("Content-Type", APPLICATION_JSON);
         exchange.sendResponseHeaders(status, bytes.length);
         try (OutputStream out = exchange.getResponseBody()) {
             out.write(bytes);

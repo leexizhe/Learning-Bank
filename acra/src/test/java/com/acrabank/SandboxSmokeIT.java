@@ -2,9 +2,9 @@ package com.acrabank;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.acrabank.profile.BusinessProfile;
-import com.acrabank.profile.BusinessProfileRepository;
-import com.acrabank.profile.BusinessProfileService;
+import com.acrabank.entity.BusinessProfile;
+import com.acrabank.repository.BusinessProfileRepository;
+import com.acrabank.service.BusinessProfileService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;

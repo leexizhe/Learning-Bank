@@ -1,5 +1,6 @@
 package com.concurrencybank.phase3_virtualthreads;
 
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -7,13 +8,10 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@RequiredArgsConstructor
 public class GatewayController {
 
     private final PaymentGatewayService gatewayService;
-
-    public GatewayController(PaymentGatewayService gatewayService) {
-        this.gatewayService = gatewayService;
-    }
 
     @PostMapping("/api/gateway/validate")
     public GatewayDecision validate(@RequestParam String transactionId) {

@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Limit;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -43,6 +44,7 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class PaymentOutboxRelayOps {
 
     /**
@@ -55,13 +57,6 @@ public class PaymentOutboxRelayOps {
     private final PaymentOutboxRepository outbox;
     private final KafkaTemplate<String, Object> kafkaTemplate;
     private final ObjectMapper objectMapper;
-
-    public PaymentOutboxRelayOps(
-            PaymentOutboxRepository outbox, KafkaTemplate<String, Object> kafkaTemplate, ObjectMapper objectMapper) {
-        this.outbox = outbox;
-        this.kafkaTemplate = kafkaTemplate;
-        this.objectMapper = objectMapper;
-    }
 
     /**
      * {@code REQUIRES_NEW}, not the default {@code REQUIRED}, and that is not cosmetic. One caller is {@code

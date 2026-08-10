@@ -1,6 +1,7 @@
 package com.postgresbank.common;
 
 import jakarta.validation.constraints.NotBlank;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -10,15 +11,11 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@RequiredArgsConstructor
 public class AccountController {
 
     private final AccountRepository accounts;
     private final LedgerService ledger;
-
-    public AccountController(AccountRepository accounts, LedgerService ledger) {
-        this.accounts = accounts;
-        this.ledger = ledger;
-    }
 
     @ResponseStatus(HttpStatus.CREATED)
     @PostMapping("/api/accounts")

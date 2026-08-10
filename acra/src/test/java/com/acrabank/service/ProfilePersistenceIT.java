@@ -1,8 +1,9 @@
-package com.acrabank.profile;
+package com.acrabank.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.acrabank.AcraTestBase;
+import com.acrabank.entity.BusinessProfile;
 import com.acrabank.testsupport.FakeAcraServer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;

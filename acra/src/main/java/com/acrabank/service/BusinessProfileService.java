@@ -1,11 +1,14 @@
-package com.acrabank.profile;
+package com.acrabank.service;
 
 import com.acrabank.client.AcraProfileClient;
 import com.acrabank.config.AcraProperties;
+import com.acrabank.entity.BusinessProfile;
+import com.acrabank.mapper.ProfileMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Optional;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -16,6 +19,7 @@ import org.springframework.stereotype.Service;
  */
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class BusinessProfileService {
 
     private final AcraProfileClient acra;
@@ -23,19 +27,6 @@ public class BusinessProfileService {
     private final ProfileMapper mapper;
     private final AcraProperties properties;
     private final Clock clock;
-
-    public BusinessProfileService(
-            AcraProfileClient acra,
-            BusinessProfileTransactionalOps db,
-            ProfileMapper mapper,
-            AcraProperties properties,
-            Clock clock) {
-        this.acra = acra;
-        this.db = db;
-        this.mapper = mapper;
-        this.properties = properties;
-        this.clock = clock;
-    }
 
     public BusinessProfile get(String uen, boolean forceRefresh) {
         Optional<BusinessProfile> stored = db.find(uen);

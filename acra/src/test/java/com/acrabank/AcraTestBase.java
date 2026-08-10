@@ -1,7 +1,7 @@
 package com.acrabank;
 
 import com.acrabank.client.AcraTokenProvider;
-import com.acrabank.profile.BusinessProfileRepository;
+import com.acrabank.repository.BusinessProfileRepository;
 import com.acrabank.testsupport.FakeAcraServer;
 import com.acrabank.testsupport.MutableClock;
 import java.time.Clock;

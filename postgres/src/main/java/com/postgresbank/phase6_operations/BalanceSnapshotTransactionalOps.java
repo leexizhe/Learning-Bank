@@ -1,6 +1,7 @@
 package com.postgresbank.phase6_operations;
 
 import com.postgresbank.common.PostingRepository;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -11,15 +12,11 @@ import org.springframework.transaction.annotation.Transactional;
  * without a transaction.
  */
 @Component
+@RequiredArgsConstructor
 public class BalanceSnapshotTransactionalOps {
 
     private final PostingRepository postings;
     private final BalanceSnapshotRepository snapshots;
-
-    public BalanceSnapshotTransactionalOps(PostingRepository postings, BalanceSnapshotRepository snapshots) {
-        this.postings = postings;
-        this.snapshots = snapshots;
-    }
 
     /**
      * Records the balance as of the newest posting that currently exists.

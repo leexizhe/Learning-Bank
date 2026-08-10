@@ -1,4 +1,4 @@
-package com.acrabank.profile;
+package com.acrabank.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
