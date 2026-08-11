@@ -8,10 +8,12 @@ easy part, being able to say *why* each line is there is the interview.
 
 | Module                                 | Topic                                                                                                                                        | Port |
 |----------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------|------|
-| [`acra`](acra/README.md)               | Consuming a third-party API: OAuth token caching and reactive re-auth, JSONB snapshots of an undocumented response, read-through TTL caching | 8084 |
 | [`concurrency`](concurrency/README.md) | Thread safety, deadlock-free transfers, virtual threads, lock striping, the live-coding primitives, the Java Memory Model                    | 8081 |
 | [`kafka`](kafka/README.md)             | Event-driven payments: ordering, idempotent consumers, the transactional outbox, retries, dead-letter topics, rebalancing                    | 8082 |
 | [`postgres`](postgres/README.md)       | PostgreSQL internals: MVCC and write skew, the append-only ledger, advisory locks, vacuum and bloat, indexes and query plans, online DDL     | 8083 |
+
+[`acra`](acra/README.md) sits in this folder too, but is **not** part of this build — it is a standalone project with
+its own `pom.xml` and wrapper, consuming Singapore's ACRA Bizfile API on port 8084. Build it from its own directory.
 
 One document cuts across the modules:
 
@@ -19,13 +21,8 @@ One document cuts across the modules:
   system-design answer. Every claim in it points at code here and a test that proves it.
 
 The modules differ in how much they can prove without a container. `concurrency` is mostly plain-Java unit tests,
-because that's the shape of a live-coding round. `kafka`, `postgres` and `acra` have **no unit-test layer at all** —
-nothing they teach means anything without a real broker, a real database, or a real socket, so every test is a
-Testcontainers integration test.
-
-`acra` is the odd one out in another way: it's the only module whose upstream is someone else's production system. That
-makes it the one place the no-mocks rule below has to be argued rather than simply applied — see [its
-README](acra/README.md#testing-without-mocking-the-government).
+because that's the shape of a live-coding round. `kafka` and `postgres` have **no unit-test layer at all** — nothing
+they teach means anything without a real broker or a real database, so every test is a Testcontainers integration test.
 
 ## How this is tested, and why it's the interesting part
 
@@ -99,7 +96,8 @@ pom.xml                     the shared parent: versions, common deps, plugin con
 docker/
   docker-compose.yml        one Postgres (four databases) + Kafka
   init/01-databases.sql     per-module roles and databases
-acra/  concurrency/  kafka/  postgres/
+concurrency/  kafka/  postgres/     modules of this build
+acra/                             standalone, own pom and wrapper
 ```
 
 Note that `concurrency` compiles with `--enable-preview`: `StructuredTaskScope` is still a preview API in JDK 25 (JEP

@@ -33,3 +33,8 @@ jobs:
       # no-op - which is why CI can't leak state between jobs the way a developer machine can between runs.
       - name: Build and run every test
         run: ./mvnw -B verify
+
+      # acra has its own pom and is not a module of the build above, so it needs its own invocation.
+      - name: Build and test acra
+        working-directory: acra
+        run: ./mvnw -B verify

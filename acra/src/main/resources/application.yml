@@ -3,56 +3,25 @@ server:
 
 spring:
   application:
-    name: acra-bank
+    name: acra
   datasource:
     url: jdbc:postgresql://localhost:5432/acrabank
     username: acrabank
     password: acrabank
   sql:
     init:
+      # schema.sql owns the schema - Hibernate never creates or alters tables.
       mode: always
   jpa:
     hibernate:
-      # schema.sql owns the schema - Hibernate never creates or alters tables.
       ddl-auto: none
     open-in-view: false
-    show-sql: false
-  data:
-    # Only SimpleAcraService talks to Redis. Nothing else in the module needs it, and Lettuce connects lazily, so the
-    # app still starts when this host is not there - you find out on the first /api/simple call, not at boot.
-    redis:
-      host: localhost
-      port: 6379
 
 acra:
   base-url: https://api-sandbox.bizfile.gov.sg
-
-  # No default on purpose. An unset variable fails the context at startup with a placeholder error, which is a better
-  # outcome than booting cleanly and 401ing on the first request. Never put a real credential in this file - it is in
-  # git.
   client-id: ${ACRA_CLIENT_ID:V0360OJG84INGFI9KGRGCGYFF41IVZ5MBDBW5IGK7WCV3QRJE04KDVTBAYQ687I3}
   client-secret: ${ACRA_CLIENT_SECRET:BEj2YhDU}
 
-  # How stale a stored profile may be before a read goes back to ACRA. A company's registered particulars change a
-  # handful of times a year at most, so a week is generous rather than aggressive; ?refresh=true bypasses it when you
-  # need current.
-  profile-ttl: 7d
-
-  # Only used when a token response omits expires_in. The sandbox returns 1799, so this matches the observed lifetime -
-  # it is a safety net, not the operating value.
-  expiry-fallback: 30m
-
-  # Refresh this far before the stated expiry, so a token cannot die in flight between the check and the call. 1799 - 60
-  # = 1739s of usable life.
-  expiry-skew: 60s
-
-  # How long SimpleAcraService leaves its token in Redis. Deliberately shorter than the 1799s ACRA advertises, so the
-  # cached copy is always dropped well before ACRA stops accepting it. Unlike AcraTokenProvider, this is the entire
-  # expiry policy - nothing reads expires_in and there is no skew arithmetic.
-  token-cache-ttl: 25m
-
-  request-timeout: 15s
-
 logging:
   level:
-    com.acrabank: debug
+    com.acra: debug

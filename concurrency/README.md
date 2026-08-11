@@ -43,6 +43,18 @@ this; `Phase1ThreadSafetyTest` proves it by hammering it with 50 threads and sho
 arithmetic sum. That one test class holds the whole phase — the broken counter and both fixes run the identical stress
 shape from shared constants, so the only thing that differs between them is the final assertion.
 
+**Making a race assert-able, which is the interesting part.** The two fixed accounts assert a guarantee and are
+therefore easy; the broken one asserts an *anomaly*, which the JMM permits but never promises, and it flaked in CI for
+two independent reasons worth knowing. First, the JIT: a plain field carries no happens-before edge, so once C2 compiles
+the deposit loop it may keep the balance in a register for all 10,000 iterations and write back once, shrinking the race
+window to nothing — measured, a plain field loses updates on a JVM's first two or three runs and then reports the exact
+total forever after. `UnsafeCounter.balance` is therefore `volatile`, which is *not* a fix (see phase 8: visibility,
+never atomicity) but forbids the hoist, so every iteration is a real read-modify-write. Second, parallelism: on a single
+CPU the harness's virtual threads never interleave, because a compute-only loop hits no blocking point and so each
+thread runs to completion on the one carrier — 20 runs out of 20 came out exact when pinned to one core. That one can't
+be retried away, so the test `assumeTrue`s two CPUs and skips below that. With both handled the stress loses updates on
+the first attempt in 39 of 40 measured trials, and it retries up to five times before failing.
+
 **Two different fixes, same problem:**
 
 - `SynchronizedAccount` — every method is `synchronized`, which is shorthand for acquiring `this`'s intrinsic monitor

@@ -5,29 +5,115 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>com.learningbank</groupId>
-        <artifactId>learning-bank</artifactId>
-        <version>0.1.0-SNAPSHOT</version>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.5.6</version>
+        <relativePath/>
     </parent>
 
+    <groupId>com.acra</groupId>
     <artifactId>acra</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
     <name>acra</name>
-    <description>Ingesting ACRA Bizfile business profiles into Postgres: OAuth token caching, reactive re-auth, JSONB
-        snapshots
-    </description>
+    <description>Fetching ACRA Bizfile business profiles and storing them in Postgres</description>
 
-    <!-- RestClient and Jackson come from spring-boot-starter-web, JSONB support from Hibernate 6, and the test double
-         for ACRA is com.sun.net.httpserver.HttpServer out of the JDK - see FakeAcraServer for why that is a real server
-         and not a mock.
-
-         Redis is here only for SimpleAcraService, which keeps its OAuth token in Redis rather than in a field. Adding
-         the starter auto-configures a Lettuce connection factory for the whole module, but Lettuce connects lazily,
-         so the contexts that never touch Redis still start without a server running. -->
+    <properties>
+        <java.version>25</java.version>
+        <!-- Boot 3.5.6's managed Lombok is too old to run on JDK 25. -->
+        <lombok.version>1.18.42</lombok.version>
+    </properties>
 
     <dependencies>
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-data-redis</artifactId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>test</scope>
         </dependency>
     </dependencies>
+
+    <build>
+        <plugins>
+            <!-- JDK 23+ stopped running classpath-discovered annotation processors by default, so Lombok has to be
+                 listed here or nothing is generated. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                            <version>${lombok.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+            <!-- Failsafe runs *IT against a Testcontainers Postgres. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>com.diffplug.spotless</groupId>
+                <artifactId>spotless-maven-plugin</artifactId>
+                <version>3.8.0</version>
+                <configuration>
+                    <java>
+                        <palantirJavaFormat/>
+                    </java>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <phase>package</phase>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
 </project>

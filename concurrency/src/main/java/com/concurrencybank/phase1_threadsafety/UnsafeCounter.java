@@ -7,7 +7,8 @@ package com.concurrencybank.phase1_threadsafety;
  */
 public class UnsafeCounter {
 
-    private long balance;
+    /** Volatile to keep the race observable */
+    private volatile long balance;
 
     public void deposit(long amount) {
         balance += amount;

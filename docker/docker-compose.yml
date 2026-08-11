@@ -81,18 +81,5 @@ services:
       timeout: 5s
       retries: 10
 
-  # Used by the acra module's SimpleAcraService, which keeps its OAuth token here instead of in a field. No volume on
-  # purpose: everything stored is a cached token with a TTL, so losing it on `down` costs one extra round trip to ACRA.
-  redis:
-    image: redis:7-alpine
-    container_name: learning-bank-redis
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
 volumes:
   pgdata:
