@@ -2,8 +2,10 @@ package com.kafkabank;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.kafkabank.common.ConsumerGroups;
 import com.kafkabank.common.PaymentInitiated;
 import com.kafkabank.common.Topics;
+import com.kafkabank.config.KafkaTopicConfig;
 import com.kafkabank.order.InitiatePaymentRequest;
 import com.kafkabank.order.InitiatePaymentResponse;
 import com.kafkabank.payment.entity.Account;
@@ -19,10 +21,14 @@ import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.serialization.StringDeserializer;
+import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
+import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.listener.MessageListenerContainer;
+import org.springframework.kafka.test.utils.ContainerTestUtils;
 import org.springframework.kafka.test.utils.KafkaTestUtils;
 
 /**
@@ -38,6 +44,13 @@ import org.springframework.kafka.test.utils.KafkaTestUtils;
 public abstract class BaseKafkaIT extends TestContainerConfig {
 
     /**
+     * The application's own groups. {@code @RetryableTopic}'s retry and DLT containers run under suffixed ids
+     * ({@code payment-service-retry-0}), so they fall outside this list — only the retry-path tests need those settled.
+     */
+    private static final List<String> APPLICATION_GROUPS =
+            List.of(ConsumerGroups.PAYMENT, ConsumerGroups.RECONCILIATION);
+
+    /**
      * Under {@code RANDOM_PORT} Boot auto-configures this bean already pointed at the running server, so tests use
      * relative paths and nothing has to capture {@code @LocalServerPort} or build a base URL by hand.
      */
@@ -49,6 +62,43 @@ public abstract class BaseKafkaIT extends TestContainerConfig {
 
     @Autowired
     protected AccountRepository accounts;
+
+    @Autowired
+    protected KafkaListenerEndpointRegistry listeners;
+
+    /**
+     * Blocks until every application listener holds its full share of partitions.
+     *
+     * <p><b>A started context is not a subscribed consumer.</b> Listener containers start asynchronously, so the POST
+     * can return 202 while {@code payment-service} is still joining. {@code auto-offset-reset: earliest} means the
+     * record is never lost, only unread until assignment lands — which makes every "debited within 30s" assertion a
+     * race against the group join rather than a test of the application. Waiting here rather than raising those
+     * budgets removes the race instead of widening it.
+     *
+     * <p>{@link ContainerTestUtils#waitForAssignment} is spring-kafka-test's own version of this loop: it sums the
+     * assignment across a concurrent container's children and polls for 60s. Waiting for the exact partition count
+     * rather than "something was assigned" is the stronger condition — a consumer that has joined holding 1 of 3
+     * partitions is still mid-rebalance.
+     */
+    @BeforeEach
+    protected void awaitPartitionAssignment() {
+        APPLICATION_GROUPS.stream()
+                .flatMap(group -> containersFor(group).stream())
+                .forEach(container -> ContainerTestUtils.waitForAssignment(container, KafkaTopicConfig.PARTITIONS));
+    }
+
+    /**
+     * The listener containers running under {@code groupId} — two of them for reconciliation, which listens to both
+     * topics under one group. Asserting here is what keeps a renamed group loud: a silent no match would otherwise
+     * turn every wait and lookup built on this into a vacuous pass.
+     */
+    protected List<MessageListenerContainer> containersFor(String groupId) {
+        List<MessageListenerContainer> found = listeners.getListenerContainers().stream()
+                .filter(container -> groupId.equals(container.getGroupId()))
+                .toList();
+        assertThat(found).as("no listener container for group %s", groupId).isNotEmpty();
+        return found;
+    }
 
     /**
      * A fresh account per test. The containers are reused across test classes, so sharing the seeded alice/bob rows

@@ -24,7 +24,7 @@ public class KafkaTopicConfig {
      * expected parallelism plus 20-30% headroom and leave it alone. 3 here is a demo number; a real payments topic
      * would be more like 24 or 48.
      */
-    private static final int PARTITIONS = 3;
+    public static final int PARTITIONS = 3;
 
     /**
      * 1 replica because this project runs against a single-broker dev cluster — asking for 3 replicas on a 1-broker

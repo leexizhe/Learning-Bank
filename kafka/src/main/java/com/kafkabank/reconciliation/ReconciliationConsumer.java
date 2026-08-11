@@ -1,5 +1,6 @@
 package com.kafkabank.reconciliation;
 
+import com.kafkabank.common.ConsumerGroups;
 import com.kafkabank.common.PaymentInitiated;
 import com.kafkabank.common.PaymentResult;
 import com.kafkabank.common.Topics;
@@ -32,8 +33,6 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class ReconciliationConsumer {
 
-    private static final String GROUP = "reconciliation-service";
-
     private final ReconciliationService reconciliationService;
 
     /**
@@ -42,13 +41,13 @@ public class ReconciliationConsumer {
      * machinery. Choosing different reliability guarantees for different consumers of the same stream is the point, not
      * an oversight.
      */
-    @KafkaListener(topics = Topics.PAYMENT_EVENTS, groupId = GROUP)
+    @KafkaListener(topics = Topics.PAYMENT_EVENTS, groupId = ConsumerGroups.RECONCILIATION)
     public void onPaymentInitiated(PaymentInitiated event, Acknowledgment ack) {
         reconciliationService.onInitiated(event);
         ack.acknowledge();
     }
 
-    @KafkaListener(topics = Topics.PAYMENT_RESULTS, groupId = GROUP)
+    @KafkaListener(topics = Topics.PAYMENT_RESULTS, groupId = ConsumerGroups.RECONCILIATION)
     public void onPaymentResult(PaymentResult result, Acknowledgment ack) {
         reconciliationService.onResult(result);
         ack.acknowledge();

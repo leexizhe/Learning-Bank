@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
 import com.kafkabank.BaseKafkaIT;
+import com.kafkabank.common.ConsumerGroups;
 import com.kafkabank.payment.entity.Account;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -11,8 +12,6 @@ import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
 import org.springframework.kafka.listener.ConcurrentMessageListenerContainer;
 import org.springframework.kafka.listener.MessageListenerContainer;
 import org.springframework.test.annotation.DirtiesContext;
@@ -61,9 +60,6 @@ class Phase6RebalancingIT extends BaseKafkaIT {
     private static final int PAYMENTS = 12;
     private static final long STARTING_BALANCE = 100_000;
     private static final long AMOUNT = 1_000;
-
-    @Autowired
-    private KafkaListenerEndpointRegistry registry;
 
     @Test
     @Timeout(120)
@@ -115,15 +111,10 @@ class Phase6RebalancingIT extends BaseKafkaIT {
         }
     }
 
-    /** The container backing {@code @KafkaListener(groupId = "payment-service")}. */
+    /** The container backing {@code @KafkaListener(groupId = ConsumerGroups.PAYMENT)} - there is exactly one. */
     private ConcurrentMessageListenerContainer<?, ?> paymentServiceContainer() {
-        for (MessageListenerContainer candidate : registry.getListenerContainers()) {
-            if ("payment-service".equals(candidate.getGroupId())
-                    && candidate instanceof ConcurrentMessageListenerContainer<?, ?> concurrent) {
-                return concurrent;
-            }
-        }
-        throw new AssertionError("no listener container found for group payment-service");
+        return (ConcurrentMessageListenerContainer<?, ?>)
+                containersFor(ConsumerGroups.PAYMENT).getFirst();
     }
 
     private static List<String> assignment(MessageListenerContainer container) {

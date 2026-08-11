@@ -1,5 +1,6 @@
 package com.kafkabank.payment;
 
+import com.kafkabank.common.ConsumerGroups;
 import com.kafkabank.common.PaymentInitiated;
 import com.kafkabank.common.Topics;
 import lombok.RequiredArgsConstructor;
@@ -60,7 +61,7 @@ public class PaymentConsumer {
             backoff = @Backoff(delay = 300, multiplier = 2.0),
             dltStrategy = DltStrategy.FAIL_ON_ERROR,
             exclude = {PermanentFailureException.class})
-    @KafkaListener(topics = Topics.PAYMENT_EVENTS, groupId = "payment-service")
+    @KafkaListener(topics = Topics.PAYMENT_EVENTS, groupId = ConsumerGroups.PAYMENT)
     public void consume(
             PaymentInitiated event,
             @Header(KafkaHeaders.RECEIVED_PARTITION) int partition,
