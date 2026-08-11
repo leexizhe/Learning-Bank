@@ -58,10 +58,13 @@ GET /api/profiles/{uen}     200 the ACRA payload | 404 no such UEN | 502 ACRA br
 
 ## Running it
 
+Both blocks below run from the **repo root**, not from this directory — the Maven wrapper lives only at the root, so
+acra is built by pointing it at this pom with `-f`.
+
 ```powershell
-docker compose -f ..\docker\docker-compose.yml up -d
+docker compose -f docker\docker-compose.yml up -d
 $env:ACRA_CLIENT_ID = "..."; $env:ACRA_CLIENT_SECRET = "..."
-.\mvnw.cmd spring-boot:run
+.\mvnw.cmd -f acra\pom.xml spring-boot:run
 
 curl "http://localhost:8084/api/profiles/16888888A"
 ```
@@ -71,7 +74,7 @@ The `acrabank` role and database come from `docker/init/01-databases.sql`.
 ## Tests
 
 ```powershell
-.\mvnw.cmd verify      # no credentials needed
+.\mvnw.cmd -f acra\pom.xml verify      # no credentials needed
 ```
 
 `AcraIT` runs the whole flow against a Testcontainers Postgres and `FakeAcraServer` — a real `com.sun.net.httpserver`
