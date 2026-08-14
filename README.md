@@ -12,9 +12,6 @@ easy part, being able to say *why* each line is there is the interview.
 | [`kafka`](kafka/README.md)             | Event-driven payments: ordering, idempotent consumers, the transactional outbox, retries, dead-letter topics, rebalancing                    | 8082 |
 | [`postgres`](postgres/README.md)       | PostgreSQL internals: MVCC and write skew, the append-only ledger, advisory locks, vacuum and bloat, indexes and query plans, online DDL     | 8083 |
 
-[`acra`](acra/README.md) sits in this folder too, but is **not** part of this build — it is a standalone project with
-its own `pom.xml` and wrapper, consuming Singapore's ACRA Bizfile API on port 8084. Build it from its own directory.
-
 One document cuts across the modules:
 
 - **[`DESIGN.md`](DESIGN.md)** — the money-movement system these modules are slices of, written as a 45-minute
@@ -53,7 +50,13 @@ Requires JDK 25 and Docker.
 .\mvnw.cmd verify                    # every module, full Testcontainers suite (slow)
 .\mvnw.cmd -pl postgres verify       # just one topic
 .\mvnw.cmd -pl concurrency test      # the fast unit tests, no Docker
+.\mvnw.cmd spotless:apply            # the thing to run when verify fails on formatting
 ```
+
+Two things worth knowing before the first build. **Spotless is a build gate, not a suggestion**: `spotless:check` is
+bound to the `package` phase, so any formatting drift fails `verify` — locally and in CI alike. `spotless:apply` fixes
+it. And **Docker Engine 29+ needs `api.version=1.44`** in each module's `src/test/resources/docker-java.properties`
+(already there) or Testcontainers gets misleading empty 400s back from the daemon.
 
 `verify` needs no running containers — Testcontainers starts throwaway ones per module. The compose stack below is only
 for driving an app by hand:
@@ -63,12 +66,12 @@ docker compose -f docker/docker-compose.yml up -d
 .\mvnw.cmd -pl postgres spring-boot:run
 ```
 
-That brings up one Postgres serving all four databases plus a single-broker Kafka, so every app can run at once on 8081
-/ 8082 / 8083 / 8084. `docker/init/01-databases.sql` creates the per-module roles and databases, run by the `pg-init`
+That brings up one Postgres serving all three databases plus a single-broker Kafka, so every app can run at once on
+8081 / 8082 / 8083. `docker/init/01-databases.sql` creates the per-module roles and databases, run by the `pg-init`
 one-shot service as soon as Postgres reports healthy.
 
 **Why a service and not `/docker-entrypoint-initdb.d`.** That directory is only read when the data directory is empty,
-so adding a fifth module meant `down -v` — destroying four working databases to create one new one. `pg-init` runs on
+so adding a module meant `down -v` — destroying every working database to create one new one. `pg-init` runs on
 every `up` instead, and the script is written to be idempotent so a stack that is already set up is left untouched.
 Neither `CREATE ROLE` nor `CREATE DATABASE` takes `IF NOT EXISTS`, so the roles are guarded by a `DO` block and the
 databases by psql's `\gexec` — `CREATE DATABASE` cannot run inside a transaction block, and a PL/pgSQL body is always
@@ -93,11 +96,12 @@ parent pom, so a new module's pom is usually just its artifactId and whatever ma
 
 ```
 pom.xml                     the shared parent: versions, common deps, plugin config
+mvnw / mvnw.cmd             the only Maven wrapper in the repo — every build starts here
+DESIGN.md                   the money-movement system these modules are slices of
 docker/
-  docker-compose.yml        one Postgres (four databases) + Kafka
+  docker-compose.yml        one Postgres (three databases) + Kafka
   init/01-databases.sql     per-module roles and databases
-concurrency/  kafka/  postgres/     modules of this build
-acra/                             standalone, own pom and wrapper
+concurrency/  kafka/  postgres/     the modules
 ```
 
 Note that `concurrency` compiles with `--enable-preview`: `StructuredTaskScope` is still a preview API in JDK 25 (JEP

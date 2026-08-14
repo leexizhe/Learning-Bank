@@ -6,7 +6,7 @@ the way you'd actually say it out loud — the code is the easy part, being able
 the interview.
 
 Everything is verified by **Testcontainers integration tests** against a real Kafka broker and a real Postgres. There
-are no unit tests and no mocks: the things worth proving here (ordering, redelivery, dead-lettering) only exist when a
+is no unit-test layer at all: the things worth proving here (ordering, redelivery, dead-lettering) only exist when a
 real broker is involved.
 
 ---
@@ -114,26 +114,21 @@ sequenceDiagram
 
 ## Quickstart
 
-```bash
-docker compose -f docker/docker-compose.yml up -d
-```
-
-```bash
-./mvnw -pl kafka verify
+```powershell
+cd Learning-Bank
+.\mvnw.cmd -pl kafka verify
 ```
 
 `verify` is the real gate — it starts its own Kafka and Postgres via Testcontainers, so it does not need the compose
-stack above. Use compose only when you want to drive the app by hand:
+stack. Use compose only when you want to drive the app by hand:
 
-```bash
-./mvnw -pl kafka spring-boot:run
+```powershell
+docker compose -f docker/docker-compose.yml up -d
+.\mvnw.cmd -pl kafka spring-boot:run
 ```
 
-```bash
+```powershell
 curl -X POST localhost:8082/api/payments -H "Content-Type: application/json" -d "{\"accountId\":1,\"amountMinor\":25000,\"description\":\"rent\"}"
-```
-
-```bash
 curl localhost:8082/api/reconciliation
 ```
 
@@ -142,7 +137,7 @@ curl localhost:8082/api/reconciliation
 They live in one Spring Boot app as three packages — `order/`, `payment/`, `reconciliation/` — but they **only ever talk
 through Kafka topics**. There is not a single direct method call across those package boundaries, which is what makes
 "these are three services in production" an honest thing to say rather than a wish. Running them in one JVM keeps
-`./mvnw verify` able to test the whole flow end to end; splitting them into three deployables would be a packaging
+`mvnw verify` able to test the whole flow end to end; splitting them into three deployables would be a packaging
 change, not a redesign.
 
 | Role | Produces | Consumes | Owns |
@@ -327,7 +322,7 @@ out of the group mid-payment.
 
 **Eager vs cooperative.** The classic protocol is stop-the-world — every member revokes every partition, then the group
 reassigns, and nobody works in between, so a rolling deploy of N pods costs N full pauses. `CooperativeStickyAssignor`
-(now set in `application.yml`) revokes only the partitions that actually move. The operational answer is the upgrade
+(set in `application.yml`) revokes only the partitions that actually move. The operational answer is the upgrade
 path: you **cannot** flip a live group in one deploy, you roll out `[CooperativeSticky, Range]` first so every member
 speaks both, then drop `Range` in a second rollout.
 
@@ -364,9 +359,6 @@ module is pinned to `apache/kafka:3.9.1`, so that stays a talking point rather t
 
 ## The tests
 
-Every test asserts on an **observable outcome** — an HTTP response, a row in Postgres, or a record actually consumed off
-a topic. None of them mock anything.
-
 One IT per phase, with a `@Nested` block per scenario — the same layout as the concurrency and postgres modules. The
 blocks are where the pairings live: phase 3 asserts a record is *absent* from the DLT and then that one is *present*,
 and phase 4 establishes the ordering guarantee and then breaks it. A single block can be run on its own with
@@ -381,23 +373,21 @@ and phase 4 establishes the ordering guarantee and then breaks it. A single bloc
 | `Phase5OutboxIT` | `AtomicityTests`: the result row is written in the *same* transaction as the debit, so a successful payment leaves exactly one row and a failed one leaves none. `RelayTests`: the relay drains what it finds. `CrashWindowRecoveryTests`: a result lost before its send lands is recovered, and the redelivery that follows does not debit twice — counted rather than waited for, so the result must appear **twice**, which no timing can fake |
 | `Phase6RebalancingIT` | No record is lost or double-applied across a real leave-and-rejoin rebalance; the idempotency table is what saves you |
 
-```bash
-./mvnw -pl kafka verify
-```
-
-```bash
-./mvnw -pl kafka verify -Dit.test=Phase2IdempotencyIT
+```powershell
+.\mvnw.cmd -pl kafka verify
+.\mvnw.cmd -pl kafka verify -Dit.test=Phase2IdempotencyIT
 ```
 
 ## Project layout
 
 ```
 src/main/java/com/kafkabank/
-  common/          event records (PaymentInitiated, PaymentResult), enums, Topics constants
-  config/          KafkaTopicConfig - partition/replica counts and the reasoning
+  common/          event records (PaymentInitiated, PaymentResult, PaymentResultRecorded), enums, Topics constants
+  config/          KafkaTopicConfig — partition/replica counts and the reasoning
   order/           OrderController + PaymentInitiationService  (produces payment-events)
   payment/         PaymentConsumer + PaymentProcessingService  (consumes it, owns balances)
                    PaymentOutboxRelay + ...RelayOps  (the outbox's two relays)
+                   AccountController  (read balances by hand while driving the app)
                    SimulatedTransientFailure  (fault injection for phase 4's retry block)
   reconciliation/  ReconciliationConsumer + ReconciliationService (consumes BOTH topics)
 src/main/resources/
@@ -414,13 +404,9 @@ src/test/java/com/kafkabank/
   phase6_rebalancing/Phase6RebalancingIT.java              leave-and-rejoin, nothing lost
 ```
 
-**Main sources stay split by role, not by phase.** `order/`, `payment/` and `reconciliation/` have no imports between
-them at all, which is what makes "these are three services in production" true rather than aspirational; every phase
-above cuts across exactly one of them, so folding main into phase packages would create the first cross-role
-dependencies and buy nothing. The phases are how the *tests* are read, and reading is what they are for.
-
-Docker Engine 29+ needs `api.version=1.44` in `src/test/resources/docker-java.properties` (already there) or
-Testcontainers gets misleading empty 400s from the daemon.
+**Main sources stay split by role, not by phase** — for the reason given under *The three roles* above. Every phase
+cuts across exactly one of the three, so folding main into phase packages would create the first cross-role dependency
+and buy nothing. The phases are how the *tests* are read, and reading is what they are for.
 
 ---
 
@@ -428,9 +414,9 @@ Testcontainers gets misleading empty 400s from the daemon.
 
 | Question | Where |
 |---|---|
-| How do you guarantee a payment is processed exactly once? | the reliability story; `Phase2IdempotencyIT` |
+| How do you guarantee a payment is processed exactly once? | phase 2 — you don't; you make it idempotent. `Phase2IdempotencyIT` |
 | Where exactly do you commit the offset, and why there? | `ack-mode: manual_immediate`; `PaymentConsumer` |
-| Consumer idempotence vs producer idempotence — different things? | the reliability story |
+| Consumer idempotence vs producer idempotence — different things? | phase 2, closing paragraph |
 | Your DB commit and your Kafka publish aren't atomic. What now? | the outbox section; `Phase5OutboxIT` |
 | The process dies between the commit and the publish. | `Phase5OutboxIT.CrashWindowRecoveryTests` |
 | How do you keep events for one account in order? | partition key; `Phase4OrderingIT` |

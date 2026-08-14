@@ -38,9 +38,10 @@ public class PaymentGatewayService {
     private final CreditCheckClient creditCheckClient;
     private final SanctionsCheckClient sanctionsCheckClient;
     private final ExecutorService executorService = Executors.newFixedThreadPool(POOL_SIZE);
-    // Deliberately a separate pool from executorService above: Q20's "isolate different types of workloads with their
-    // own executor" made concrete - this method's async chain never competes with validateWithExecutorService's work
-    // for the same threads.
+    // Deliberately a separate pool from executorService above. Isolating unrelated workloads onto their own executor
+    // is the practice being made concrete here: this method's async chain never competes with
+    // validateWithExecutorService's work for the same threads, so one of them saturating its pool cannot stall the
+    // other. Sharing a single pool between unrelated callers is how an unrelated slow task becomes your outage.
     private final ExecutorService completableFutureExecutor = Executors.newFixedThreadPool(3);
 
     public GatewayDecision validate(String transactionId) {
@@ -122,7 +123,7 @@ public class PaymentGatewayService {
      * A third variant, using {@code CompletableFuture} on its own dedicated executor — the composition style most Java
      * codebases already reach for day to day, so it's worth seeing next to the other two.
      *
-     * <p><b>Never block inside the async chain</b> (Q20): the one blocking call anywhere in this method is {@code
+     * <p><b>Never block inside the async chain.</b> The one blocking call anywhere in this method is {@code
      * Thread.sleep} inside the check clients, standing in for a real HTTP call — in production that would be a
      * genuinely non-blocking HTTP client, not a blocking one wrapped in {@code supplyAsync} and hoped away. Wrapping
      * blocking I/O in {@code supplyAsync} still ties up one of {@code completableFutureExecutor}'s threads for the

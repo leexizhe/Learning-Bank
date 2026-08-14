@@ -13,7 +13,7 @@ DO $$
 DECLARE
     module text;
 BEGIN
-    FOREACH module IN ARRAY ARRAY['acrabank', 'concurrencybank', 'kafkabank', 'postgresbank'] LOOP
+    FOREACH module IN ARRAY ARRAY['concurrencybank', 'kafkabank', 'postgresbank'] LOOP
         IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = module) THEN
             EXECUTE format('CREATE ROLE %I LOGIN PASSWORD %L', module, module);
         END IF;
@@ -25,6 +25,6 @@ $$;
 -- always one. \gexec is the psql-side answer - it takes the rows a query returns and runs each one as its own
 -- statement, so a query matching nothing executes nothing.
 SELECT format('CREATE DATABASE %I OWNER %I', module, module)
-FROM unnest(ARRAY['acrabank', 'concurrencybank', 'kafkabank', 'postgresbank']) AS module
+FROM unnest(ARRAY['concurrencybank', 'kafkabank', 'postgresbank']) AS module
 WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = module)
 \gexec

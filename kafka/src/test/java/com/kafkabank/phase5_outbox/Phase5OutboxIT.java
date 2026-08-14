@@ -131,9 +131,10 @@ class Phase5OutboxIT extends BaseKafkaIT {
      *
      * <p><b>Why this counts records rather than waiting for one.</b> The obvious shape — seek to the end of the topic,
      * then trigger the crash, then wait for a record — is a race against a relay that publishes within about 400ms, and
-     * it loses intermittently. Counting matches from offset 0 is monotonic instead: the result must appear <b>twice</b>,
-     * once from the original publish and once from the recovery, and no amount of timing can make two records look like
-     * one. The payment id is a fresh UUID, so records left on the topic by other tests are invisible to the filter.
+     * it loses intermittently. Counting matches from offset 0 is monotonic instead: the result must appear
+     * <b>twice</b>, once from the original publish and once from the recovery, and no amount of timing can make two
+     * records look like one. The payment id is a fresh UUID, so records left by other tests are invisible to the
+     * filter.
      *
      * <p><b>What was deliberately not done.</b> Standing up a second application context with the relay disabled via
      * {@code @SpringBootTest(properties = ...)} would be a trap here: the containers are static and shared, so the

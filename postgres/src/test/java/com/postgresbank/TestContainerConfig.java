@@ -10,10 +10,15 @@ import org.testcontainers.containers.PostgreSQLContainer;
  */
 public abstract class TestContainerConfig {
 
-    // The database name is what keeps this container distinct from the other modules'. Reuse is keyed on a hash of the
-    // container configuration, so two modules asking for an identically-configured postgres:18-alpine get the *same*
-    // physical container - and then whichever runs second finds the other's `accounts` table already there, silently
-    // skips its own CREATE TABLE IF NOT EXISTS, and fails on the missing columns.
+    // The database name is what keeps this container distinct from the other modules', and this is the canonical
+    // explanation of why — the kafka and concurrency suites each repeat the rule in one line and point here.
+    //
+    // Reuse is keyed on a hash of the container configuration, so two modules asking for an identically-configured
+    // postgres:18-alpine get handed the *same* physical container. Whichever runs second then finds the other's
+    // `accounts` table already there, silently skips its own CREATE TABLE IF NOT EXISTS, and fails on the missing
+    // columns. Note how badly that fails: not "container in use", but a schema error in a module that never touched
+    // the other's schema — and only when the two run in the same session, so it cannot reproduce on CI, where
+    // TESTCONTAINERS_REUSE_ENABLE is unset and reuse degrades to a no-op.
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:18-alpine")
             .withDatabaseName("postgresbank")
             .withReuse(true);

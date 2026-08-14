@@ -1,6 +1,6 @@
 name: learning-bank
 
-# One stack for every module (four databases, one per module). Tests don't use any of this - they get their own
+# One stack for every module (three databases, one per module). Tests don't use any of this - they get their own
 # throwaway containers from Testcontainers (see each module's TestContainerConfig). This is only for `mvnw
 # spring-boot:run`.
 

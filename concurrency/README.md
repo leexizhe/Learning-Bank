@@ -5,17 +5,18 @@ Wise/Revolut-style interviews ask) on a single running story: a toy bank. Each p
 actually explain it out loud in an interview — the point isn't the code, it's being able to talk through *why* each line
 is there.
 
-Fast unit tests (no Docker) cover phases 1-3 and 5-6: they're written as plain Java classes because that's the shape of
-a live-coding round — you're asked to implement a thread-safe class from scratch, not stand up a Spring app. Phase 4
-wraps a transfer service in a real Spring Boot REST API backed by Postgres, and gets the one Testcontainers integration
-test: fire concurrent HTTP requests at a real database and prove the books stay balanced.
+Fast unit tests (no Docker) cover phases 1-3 and 5-8: they're written as plain Java classes because that's the shape of
+a live-coding round — you're asked to implement a thread-safe class from scratch, not stand up a Spring app. Phase 4 is
+the exception in both directions: its load balancer is a plain unit test like the rest, but its ledger wraps a transfer
+service in a real Spring Boot REST API backed by Postgres and gets the module's one Testcontainers integration test —
+fire concurrent HTTP requests at a real database and prove the books stay balanced.
 
 ## Quickstart
 
 ```powershell
 cd Learning-Bank
-.\mvnw.cmd -pl concurrency test      # phases 1-3 + load balancer unit tests, no Docker needed
-.\mvnw.cmd -pl concurrency verify     # + phase 4 Testcontainers integration tests (needs Docker)
+.\mvnw.cmd -pl concurrency test      # phases 1-3, 5-8 + the load balancer, no Docker needed
+.\mvnw.cmd -pl concurrency verify     # + phase 4's ledger Testcontainers integration test (needs Docker)
 .\mvnw.cmd -pl concurrency spring-boot:run   # run the app on :8081 (needs a local Postgres, or use docker: see below)
 ```
 
@@ -108,9 +109,8 @@ from "a slow machine", and it can't tell a genuine fix from a lucky interleaving
 *broken* version — locks in caller order, with a blocking `lock()` and no timeout — and
 `Phase2DeadlockTest.NaiveTransferServiceTests` asserts it genuinely deadlocks, with
 **`ThreadMXBean.findDeadlockedThreads()`** as the witness. That's the JVM's own lock-graph analysis naming both threads
-as a cycle, not an inference from elapsed
-time. The two threads rendezvous on a `CyclicBarrier` between taking their first lock and asking for their second, so
-the circular wait is *deterministic* rather than a race the test hopes wins.
+as a cycle, not an inference from elapsed time. The two threads rendezvous on a `CyclicBarrier` between taking their
+first lock and asking for their second, so the circular wait is *deterministic* rather than a race the test hopes wins.
 
 Two details that make it safe to keep in a build:
 
@@ -120,8 +120,8 @@ Two details that make it safe to keep in a build:
 - `findDeadlockedThreads()` is **JVM-global**, and Surefire runs every test class in one fork. So
   `Phase2DeadlockTest.LockOrderedTransferServiceTests`' mirror assertion — polled *while* its two threads contend,
   asserting the JVM never sees a cycle between them — is scoped to its own thread ids. An unscoped `isEmpty()` would
-  pass or fail depending on
-  class ordering. (Verify with `-Dsurefire.runOrder=reversealphabetical`, which puts the naive demo first.)
+  pass or fail depending on class ordering. (Verify with `-Dsurefire.runOrder=reversealphabetical`, which puts the
+  naive demo first.)
 
 Use `findDeadlockedThreads()`, not `findMonitorDeadlockedThreads()`: the latter only sees cycles built from
 `synchronized` monitors, and `LockedAccount` guards itself with a `ReentrantLock`.
@@ -421,6 +421,7 @@ src/main/java/com/concurrencybank/
   phase4_loadbalancer/   LoadBalancer, RoundRobinLoadBalancer, RandomLoadBalancer
   phase4_ledger/         entity/repository/service/controller/dto/exception — the Postgres-backed ledger
   phase5_locking_gotchas/ ConcurrentLedger, StringLockBugDemo, LockStripedRegistry, BankRegistry, ExchangeRateService(Holder)
+                          InterruptibleAction — a Runnable that may throw InterruptedException (see below)
   phase6_async_patterns/  PinningDemo, AuditContext, TellerQueue, CounterContention
   phase7_primitives/      TokenBucketRateLimiter, SlidingWindowRateLimiter, ConcurrentLruCache, BoundedBufferWithCondition, BorrowablePool
   phase8_memorymodel/     UnsafePublication, FinalFieldFreeze, StopFlagVisibility
@@ -438,17 +439,22 @@ and most of a phase is the same test twice with one thing changed. Keeping a pha
 difference instead of holding two files in your head. The `@Nested` blocks keep each topic grouped in the IDE test tree
 and still allow targeting a single one with ``-Dtest='Phase3VirtualThreadsTest$ExecutorServiceTests'``.
 
+Phase 4 is the one phase with two test classes, and the split is Surefire/Failsafe rather than topical:
+`Phase4LoadBalancerTest` is a plain unit test, `Phase4LedgerIT` needs a container. A `*Test` and a `*IT` cannot be the
+same file, because they run in different phases of the build.
+
+`InterruptibleAction` exists for a small but real reason: `Runnable.run()` cannot declare a checked exception, and the
+lock-striping demo hands it work that blocks. Swallowing `InterruptedException` inside the helper would destroy the
+interruption semantics phase 5 is trying to show, so the functional interface declares it instead.
+
 ## Commands
 
 ```powershell
-.\mvnw.cmd -pl concurrency test      # Surefire: *Test (phases 1-3, 5-6, pure logic + concurrency stress, no Docker)
-.\mvnw.cmd -pl concurrency verify     # + Failsafe: *IT (phase 4, full app against Testcontainers Postgres)
+.\mvnw.cmd -pl concurrency test      # Surefire: *Test (phases 1-3, 5-8 + phase 4's load balancer, no Docker)
+.\mvnw.cmd -pl concurrency verify     # + Failsafe: *IT (phase 4's ledger, full app against Testcontainers Postgres)
 .\mvnw.cmd -pl concurrency test -Dtest=Phase2DeadlockTest   # single phase
 .\mvnw.cmd -pl concurrency verify -Dit.test=Phase4LedgerIT -Dtest=skip   # single IT
 ```
-
-Docker Engine 29+ needs `api.version=1.44` in `src/test/resources/docker-java.properties` (already there) or
-Testcontainers gets misleading empty 400s from the daemon.
 
 ---
 

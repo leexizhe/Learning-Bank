@@ -82,8 +82,11 @@ class Phase4LoadBalancerTest {
             assertThatThrownBy(() -> balancer.pickServer(List.of())).isInstanceOf(IllegalArgumentException.class);
         }
 
-        /** The weaker sibling of {@link RoundRobinTests#distributesEvenlyUnderConcurrentLoad()}: no exact counts to
-         * assert, only that every server was reached at least once. */
+        /**
+         * The weaker sibling of {@link RoundRobinTests#distributesEvenlyUnderConcurrentLoad()}: no exact counts to
+         * assert, only that every server was reached at least once. Randomness cannot promise a distribution, so the
+         * assertion has to be the weakest claim that would still fail if picking were broken.
+         */
         @Test
         void everyServerGetsPickedUnderConcurrentLoad() throws InterruptedException {
             RandomLoadBalancer balancer = new RandomLoadBalancer();

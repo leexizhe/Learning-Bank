@@ -23,9 +23,9 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * <p><b>And the test suite did not notice</b>, which is the part worth sitting with.
  * {@code Phase3CoordinationIT.OutboxTests} called {@code relayOnce()} directly — an <em>external</em> call, so it went
- * through the proxy and worked perfectly. The suite exercised the one path that was fine and never touched the one
- * that ran in production. A green build proved the
- * method worked when called the way the test called it, which was not the way the application called it.
+ * through the proxy and worked perfectly. The suite exercised the one path that was fine and never touched the one that
+ * ran in production. A green build proved the method worked when called the way the test called it, which was not the
+ * way the application called it.
  *
  * <p>Doubly worth knowing because this module already gets this right elsewhere: {@code JointOverdraftTransactionalOps}
  * and {@code TransferTransactionalOps} exist for exactly this reason. The pattern was applied everywhere except the one

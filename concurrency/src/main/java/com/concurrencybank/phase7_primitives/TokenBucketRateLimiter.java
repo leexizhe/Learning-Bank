@@ -85,8 +85,7 @@ public class TokenBucketRateLimiter {
     private void refill() {
         long elapsed = nanoTime.getAsLong() - lastRefillNanos;
         if (elapsed < nanosPerToken) {
-            // Not one whole token's worth of time yet. Crucially, leave
-            // lastRefillNanos alone — see the class javadoc.
+            // Not one whole token's worth of time yet. Crucially, leave lastRefillNanos alone — see the class javadoc.
             return;
         }
         long earned = elapsed / nanosPerToken;

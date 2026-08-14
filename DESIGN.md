@@ -2,9 +2,9 @@
 
 *"Design a system that moves money between accounts, at 10k transfers/sec, that never loses or duplicates a payment."*
 
-The three modules in this repo are vertical slices of this system. This document is the horizontal story that ties them
-together — and every claim below points at code that exists and a test that proves it, because a design you have
-actually built is a different conversation from one you have only drawn.
+The three modules in this repo — `concurrency`, `kafka`, `postgres` — are vertical slices of this system. This document
+is the horizontal story that ties them together — and every claim below points at code that exists and a test that
+proves it, because a design you have actually built is a different conversation from one you have only drawn.
 
 Read it as a 45-minute whiteboard: clarify, sketch, then spend most of the time on what happens when it breaks.
 
@@ -12,18 +12,22 @@ Read it as a 45-minute whiteboard: clarify, sketch, then spend most of the time 
 
 ## 1. Clarify first
 
-Interviewers grade the questions as much as the answer. The ones that change the design:
+Interviewers grade the questions as much as the answer. Five that change the design — each with the answer this repo
+committed to, and what that answer bought or cost:
 
 - **Internal ledger transfers, or external rails?** Internal means one database and a real transaction. External means
   you cannot roll back the outside world, and everything below about reversals and reconciliation becomes load-bearing.
+  → **Internal here**, which is why §7 can point at a test for every failure row except the two marked *design-only*.
 - **Single currency?** Multi-currency means FX rates, which means a `NUMERIC` somewhere and a decision about who bears
-  rounding.
+  rounding. → **Single**, which is what lets the ledger store a `BIGINT` count of minor units (§3) instead.
 - **Synchronous confirmation, or async?** "Your transfer is complete" on the HTTP response is a very different system
-  from "we've accepted it".
+  from "we've accepted it". → **Async**, which is why `POST /api/payments` answers **202, not 201** — at that instant
+  nothing has been debited and all that exists is a durable append to a topic.
 - **What consistency does a balance read need?** Read-your-writes for the payer is usually non-negotiable; everyone else
-  can tolerate lag.
+  can tolerate lag. → That split is the whole of §5: the debit is strongly consistent, the reconciliation view is not.
 - **What's the actual failure budget?** "Never loses a payment" is a durability requirement. "Never duplicates" is an
-  idempotency requirement. They have different solutions and people conflate them.
+  idempotency requirement. They have different solutions and people conflate them. → The outbox (§5) answers the first;
+  `processed_events` (§2) answers the second. Notice they are separate mechanisms, because they are separate problems.
 
 Assume for the rest of this: internal ledger, single currency, async confirmation, read-your-writes for the payer.
 
@@ -84,8 +88,8 @@ lock would not have helped even if you had taken one. Fix with SERIALIZABLE (SSI
 with `40001`) plus a retry, or materialise the conflict onto a single lockable row. → proved by `Phase1IsolationIT`.
 
 **And the database breaks its own deadlocks**, unlike the JVM: `deadlock_timeout`, a wait-graph check, and one victim
-killed with `40P01`. So `40P01` and `40001` belong in the same retry loop. → proved by
-`Phase6OperationsIT.PgDeadlockTests`.
+killed with `40P01`. So `40P01` and `40001` belong in the same retry loop. → proved by `Phase6OperationsIT`'s
+`PgDeadlockTests`.
 
 **The real bottleneck is a hot account**, not the lock strategy. Ordering does not fix contention on one row. Options:
 optimistic concurrency with retry; per-account queueing so one account's traffic serialises without blocking anyone
@@ -111,7 +115,7 @@ outbox; it moves. Say that out loud — it is the staff-level version of the ans
 
 **Ordering has a limit worth naming.** Keying by `accountId` gives per-account ordering — until a retry topic breaks it,
 because a failed event goes to the retry topic while the next one keeps flowing. → proved by
-`Phase4OrderingIT.UnderRetryTests`, with the three ways out in `kafka/README.md`.
+`Phase4OrderingIT.UnderRetryTests`; the three ways out are laid out in `kafka/README.md`, and none of them is free.
 
 ---
 
@@ -123,8 +127,27 @@ Matching your ledger against the external rail's statement, continuously.
 state for "we think this happened and they don't". Model breaks explicitly — `PENDING`, `CONFIRMED`, `ROLLBACK` — rather
 than treating a mismatch as an exception.
 
-The consumer reads both topics and matches the two halves of each payment by `paymentId`, in either arrival order. →
-`kafka/reconciliation`.
+**The mechanism: one row per payment, assembled from two topics.** `ReconciliationRecord` is keyed on `paymentId`,
+which is what makes matching possible at all — the initiated event and the result event carry the same id, so they can
+be joined even though they arrive separately, at different times, on different topics. Each side writes only its own
+fields (`recordInitiated` sets account and amount, `recordResult` sets the status) and then asks whether the row has
+become complete. → `kafka/reconciliation`.
+
+**Either half can arrive first, and the code must not care.** The initiated event is published before the result
+exists, so "initiated then result" is the common case — but the two topics are consumed by independent listener
+threads, so the result can win the race. Nothing in `ReconciliationService` assumes an order; both paths go through the
+same `insertIfAbsent` + `SELECT … FOR UPDATE` upsert. **An order-dependent matcher is the classic reconciliation bug**,
+and it passes every test written on a quiet machine.
+
+**`PENDING` is a real state, not a gap.** The row only reaches `CONFIRMED` or `ROLLBACK` once *both* halves have
+arrived; until then it stays `PENDING`. That is the honest answer, and it is also the thing a dashboard alerts on: **a
+payment stuck `PENDING` past a threshold means one of the two sides never showed up** — which is precisely the break
+you built reconciliation to find. Alert on the age of the oldest `PENDING` row, not on a count.
+
+**What this shape does not cover**, and it is worth naming: there is no external statement here, so there is no
+third-party view to disagree with us. Against a real rail you also need a periodic sweep over *their* file — because
+the break that matters most is the payment they have and we do not, and no amount of consuming our own topics will ever
+surface it.
 
 ---
 
@@ -183,12 +206,14 @@ Naming the boundary is part of the answer:
 
 ## Where to look
 
+Every link below lands on the section itself, not the top of a 450-line file.
+
 | Section | Module |
 |---|---|
-| Idempotency at the edge | [`postgres/phase2_ledger`](postgres/README.md) |
-| The ledger, snapshots, deferred constraints | [`postgres/phase2_ledger`, `phase6_operations`](postgres/README.md) |
-| Concurrency control | [`concurrency/phase2_deadlock`](concurrency/README.md), [`postgres/phase1_isolation`](postgres/README.md) |
-| Indexes and query plans | [`postgres/phase5_indexing`](postgres/README.md) |
-| Async fan-out, outbox, ordering | [`kafka/payment`](kafka/README.md) |
-| Reconciliation | [`kafka/reconciliation`](kafka/README.md) |
-| Live-coding primitives, the JMM | [`concurrency/phase7_primitives`, `phase8_memorymodel`](concurrency/README.md) |
+| Idempotency at the edge | [`postgres/phase2_ledger`](postgres/README.md#phase-2--the-append-only-ledger--storage-internals-phase2_ledger) |
+| The ledger, snapshots, deferred constraints | [`postgres/phase2_ledger`](postgres/README.md#phase-2--the-append-only-ledger--storage-internals-phase2_ledger), [`phase6_operations`](postgres/README.md#phase-6--operations-snapshots-deferred-constraints-deadlocks-online-ddl-phase6_operations) |
+| Concurrency control | [`concurrency/phase2_deadlock`](concurrency/README.md#phase-2--deadlock-free-transfers-phase2_deadlock), [`postgres/phase1_isolation`](postgres/README.md#phase-1--transaction-isolation--mvcc-phase1_isolation) |
+| Indexes and query plans | [`postgres/phase5_indexing`](postgres/README.md#phase-5--indexes--query-plans-phase5_indexing) |
+| Async fan-out, outbox, ordering | [`kafka/payment`](kafka/README.md#phase-5--the-dual-write-problem-and-the-transactional-outbox-phase5_outbox), [ordering](kafka/README.md#phase-4--ordering-and-my-own-retry-topic-breaking-it-phase4_ordering) |
+| Reconciliation | [`kafka/reconciliation`](kafka/README.md#the-three-roles) |
+| Live-coding primitives, the JMM | [`concurrency/phase7_primitives`](concurrency/README.md#phase-7--live-coding-primitives-phase7_primitives), [`phase8_memorymodel`](concurrency/README.md#phase-8--the-java-memory-model-made-observable-phase8_memorymodel) |
